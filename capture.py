@@ -35,7 +35,7 @@ def main():
     with open(args.output, "w") as f:
         json.dump(data, f, indent=2)
     print(f"Saved to {args.output}")
-    print(f"Now edit the JSON, then run: python3 render.py {args.output} -o mockup.svg")
+    print(f"Now edit the JSON, then run: python3 render.py {args.output} -o mockup.png")
 
 
 if __name__ == "__main__":

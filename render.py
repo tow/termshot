@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Render a captured (and optionally edited) terminal state to SVG or HTML.
+Render a captured (and optionally edited) terminal state to SVG, HTML, PNG, or ANSI.
 
 Usage:
     python3 render.py capture.json -o mockup.svg
-    python3 render.py capture.json -o mockup.html
-    python3 render.py capture.json -o mockup.svg --title "My App v2.0"
+    python3 render.py capture.json -o mockup.html --title "My App v2.0"
+    python3 render.py capture.json -o mockup.png --font "DejaVu Sans Mono"
+    python3 render.py capture.json -o mockup.ansi
 
 The renderer resolves raw ANSI color names/indices from pyte into hex values
 using the standard xterm-256color palette. The TUI's own colors are preserved
@@ -23,31 +24,53 @@ import os
 import sys
 
 
-# Fallback for the 16 basic ANSI named colors.
-# These are the ONLY colors that are terminal-theme-dependent — the actual
-# shade of "blue" or "red" varies by terminal emulator and color scheme.
-# We use xterm defaults here. Apps that care about exact colors use
-# truecolor (24-bit RGB) or 256-color indices instead, both of which pyte
-# resolves to exact hex values that pass through without any mapping.
-ANSI_16 = {
-    "black":         "#000000",
-    "red":           "#cd0000",
-    "green":         "#00cd00",
-    "brown":         "#cdcd00",  # pyte calls SGR yellow "brown"
-    "yellow":        "#cdcd00",
-    "blue":          "#0000ee",
-    "magenta":       "#cd00cd",
-    "cyan":          "#00cdcd",
-    "white":         "#e5e5e5",
-    "brightblack":   "#7f7f7f",
-    "brightred":     "#ff0000",
-    "brightgreen":   "#00ff00",
-    "brightyellow":  "#ffff00",
-    "brightblue":    "#5c5cff",
-    "brightmagenta": "#ff00ff",
-    "brightcyan":    "#00ffff",
-    "brightwhite":   "#ffffff",
-}
+# The 16 basic ANSI named colors — the ONLY colors that are
+# terminal-theme-dependent. Apps that care about exact colors use
+# truecolor or 256-color indices instead, which pyte resolves to
+# exact hex values that pass through without any mapping.
+#
+# This table is the single source of truth for named ANSI color mapping.
+# The hex values are standard xterm defaults. The SGR code mapping
+# derives from the key order (black=0, red=1, ...).
+# The 16 basic ANSI named colors in SGR order (black=0 .. white=7,
+# brightblack=8 .. brightwhite=15). "yellow" is an alias for "brown"
+# (pyte's name for SGR color 3) and is added separately so it doesn't
+# shift the SGR index enumeration.
+_ANSI_16_ORDERED = [
+    ("black",         "#000000"),
+    ("red",           "#cd0000"),
+    ("green",         "#00cd00"),
+    ("brown",         "#cdcd00"),   # pyte calls SGR yellow "brown"
+    ("blue",          "#0000ee"),
+    ("magenta",       "#cd00cd"),
+    ("cyan",          "#00cdcd"),
+    ("white",         "#e5e5e5"),
+    ("brightblack",   "#7f7f7f"),
+    ("brightred",     "#ff0000"),
+    ("brightgreen",   "#00ff00"),
+    ("brightyellow",  "#ffff00"),
+    ("brightblue",    "#5c5cff"),
+    ("brightmagenta", "#ff00ff"),
+    ("brightcyan",    "#00ffff"),
+    ("brightwhite",   "#ffffff"),
+]
+
+ANSI_16 = {name: hex_val for name, hex_val in _ANSI_16_ORDERED}
+ANSI_16["yellow"] = ANSI_16["brown"]  # alias
+
+# SGR codes for foreground/background, derived from the ordered list.
+# Normal colors: fg 30-37 / bg 40-47. Bright: fg 90-97 / bg 100-107.
+_ANSI_FG_CODES = {}
+_ANSI_BG_CODES = {}
+for _i, (_name, _) in enumerate(_ANSI_16_ORDERED):
+    if _i >= 8:
+        _ANSI_FG_CODES[_name] = str(90 + _i - 8)
+        _ANSI_BG_CODES[_name] = str(100 + _i - 8)
+    else:
+        _ANSI_FG_CODES[_name] = str(30 + _i)
+        _ANSI_BG_CODES[_name] = str(40 + _i)
+_ANSI_FG_CODES["yellow"] = _ANSI_FG_CODES["brown"]
+_ANSI_BG_CODES["yellow"] = _ANSI_BG_CODES["brown"]
 
 
 def _is_bare_hex(s):
@@ -329,45 +352,22 @@ pre {{
 </html>"""
 
 
-def _color_to_ansi_fg(raw):
-    """Convert a raw pyte color to an ANSI foreground escape sequence."""
+def _color_to_ansi(raw, layer="fg"):
+    """Convert a raw pyte color to an ANSI escape sequence.
+
+    layer: "fg" for foreground (SGR 38), "bg" for background (SGR 48).
+    """
     if not raw or raw == "default":
         return ""
-    # Named ANSI color → use standard SGR codes
-    names_fg = {
-        "black": "30", "red": "31", "green": "32", "brown": "33",
-        "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37",
-        "brightblack": "90", "brightred": "91", "brightgreen": "92",
-        "brightyellow": "93", "brightblue": "94", "brightmagenta": "95",
-        "brightcyan": "96", "brightwhite": "97",
-    }
-    if isinstance(raw, str) and raw.lower() in names_fg:
-        return f"\x1b[{names_fg[raw.lower()]}m"
+    codes = _ANSI_FG_CODES if layer == "fg" else _ANSI_BG_CODES
+    if isinstance(raw, str) and raw.lower() in codes:
+        return f"\x1b[{codes[raw.lower()]}m"
     # Bare hex (truecolor from pyte) or #hex
     hex_val = raw.lstrip("#") if isinstance(raw, str) else raw
     if isinstance(hex_val, str) and len(hex_val) == 6 and _is_bare_hex(hex_val):
         r, g, b = int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
-        return f"\x1b[38;2;{r};{g};{b}m"
-    return ""
-
-
-def _color_to_ansi_bg(raw):
-    """Convert a raw pyte color to an ANSI background escape sequence."""
-    if not raw or raw == "default":
-        return ""
-    names_bg = {
-        "black": "40", "red": "41", "green": "42", "brown": "43",
-        "yellow": "43", "blue": "44", "magenta": "45", "cyan": "46", "white": "47",
-        "brightblack": "100", "brightred": "101", "brightgreen": "102",
-        "brightyellow": "103", "brightblue": "104", "brightmagenta": "105",
-        "brightcyan": "106", "brightwhite": "107",
-    }
-    if isinstance(raw, str) and raw.lower() in names_bg:
-        return f"\x1b[{names_bg[raw.lower()]}m"
-    hex_val = raw.lstrip("#") if isinstance(raw, str) else raw
-    if isinstance(hex_val, str) and len(hex_val) == 6 and _is_bare_hex(hex_val):
-        r, g, b = int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
-        return f"\x1b[48;2;{r};{g};{b}m"
+        sgr = 38 if layer == "fg" else 48
+        return f"\x1b[{sgr};2;{r};{g};{b}m"
     return ""
 
 
@@ -384,8 +384,8 @@ def render_ansi(data):
         for cell in row:
             # Build style string for this cell
             sgr = ""
-            sgr += _color_to_ansi_fg(cell.get("fg"))
-            sgr += _color_to_ansi_bg(cell.get("bg"))
+            sgr += _color_to_ansi(cell.get("fg"), "fg")
+            sgr += _color_to_ansi(cell.get("bg"), "bg")
             if cell.get("bold"):
                 sgr += "\x1b[1m"
             if cell.get("italic"):
@@ -397,7 +397,10 @@ def render_ansi(data):
 
             # Only emit reset + new style when style changes
             if sgr != prev_style:
-                parts.append("\x1b[0m" + sgr)
+                if prev_style is not None:
+                    parts.append("\x1b[0m")
+                if sgr:
+                    parts.append(sgr)
                 prev_style = sgr
 
             parts.append(cell.get("char", " "))
@@ -410,7 +413,8 @@ def render_ansi(data):
 
 def _build_terminal_cmd(terminal, font_name, font_size, bg, fg, cols, rows, ansi_path):
     """Build the command to launch a terminal displaying the ANSI file."""
-    shell_cmd = f"printf '\\033[?25l'; cat {ansi_path}; sleep 10"
+    from shlex import quote
+    shell_cmd = f"printf '\\033[?25l'; cat {quote(ansi_path)}; sleep 10"
 
     if terminal == "urxvt":
         return [
@@ -435,7 +439,7 @@ def _build_terminal_cmd(terminal, font_name, font_size, bg, fg, cols, rows, ansi
             "+sb",
             "-b", "0",
             "-bw", "0",
-            "-e", f"{shell_cmd}",
+            "-e", shell_cmd,
         ]
 
 
@@ -448,7 +452,7 @@ def _detect_terminal():
     return None
 
 
-def render_png(data, output_path, title=None, font_name="DejaVu Sans Mono",
+def render_png(data, output_path, font_name="DejaVu Sans Mono",
                font_size=14, terminal=None):
     """Render terminal state to PNG via a headless terminal.
 
@@ -484,9 +488,18 @@ def render_png(data, output_path, title=None, font_name="DejaVu Sans Mono",
         f.write(ansi_content)
         ansi_path = f.name
 
-    import random
-    display_num = random.randint(10, 99)
+    # Find a free display number by checking lock files
+    display_num = None
+    for candidate in range(10, 100):
+        if not os.path.exists(f"/tmp/.X{candidate}-lock"):
+            display_num = candidate
+            break
+    if display_num is None:
+        print("Error: no free X display number found", file=sys.stderr)
+        sys.exit(1)
+
     xvfb = None
+    term_proc = None
     try:
         xvfb = subprocess.Popen(
             ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24"],
@@ -514,15 +527,21 @@ def render_png(data, output_path, title=None, font_name="DejaVu Sans Mono",
             ["xdotool", "search", "--pid", str(term_proc.pid)],
             env=env, capture_output=True, text=True,
         )
-        window_id = result.stdout.strip().split("\n")[0]
+        window_ids = result.stdout.strip().split("\n")
+        window_id = window_ids[0] if window_ids[0] else ""
+
+        if not window_id:
+            print(f"Error: {terminal} window not found (process may have crashed)",
+                  file=sys.stderr)
+            sys.exit(1)
 
         subprocess.run(
             ["import", "-window", window_id, output_path],
             env=env, check=True,
         )
-
-        term_proc.kill()
     finally:
+        if term_proc:
+            term_proc.kill()
         if xvfb:
             xvfb.kill()
         os.unlink(ansi_path)
@@ -555,10 +574,14 @@ def main():
         with open(args.output, "w") as f:
             f.write(result)
     elif ext == ".png":
-        render_png(data, args.output, title=args.title,
+        if args.title:
+            print("Note: --title is not supported for PNG output", file=sys.stderr)
+        render_png(data, args.output,
                    font_name=args.font, font_size=args.font_size,
                    terminal=args.terminal)
     elif ext == ".ansi":
+        if args.title:
+            print("Note: --title is not supported for ANSI output", file=sys.stderr)
         result = render_ansi(data)
         with open(args.output, "w") as f:
             f.write(result)

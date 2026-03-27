@@ -26,15 +26,13 @@ import json
 import sys
 
 
-def color_to_curses(raw, is_fg=True):
+def color_to_curses(raw):
     """Convert a raw pyte color to curses color init args.
 
     Returns (r, g, b) scaled to 0-1000 for curses, or None for default.
     """
     if not raw or raw == "default":
         return None
-
-    hex_val = None
 
     # Named ANSI colors
     ANSI_NAMES = {
@@ -227,8 +225,7 @@ class Editor:
             self.cursor_y = y
             self.cursor_x = x
             self.message = "undo"
-            if not self.undo_stack:
-                self.modified = False
+            self.modified = len(self.undo_stack) > 0
 
     def run(self, stdscr):
         """Main editor loop."""

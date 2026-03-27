@@ -72,6 +72,8 @@ class Session:
 
     def send(self, text):
         """Send raw text/keystrokes to the pty."""
+        if self.master_fd is None:
+            raise RuntimeError("Session is closed")
         os.write(self.master_fd, text.encode("utf-8"))
 
     def screen_text(self):

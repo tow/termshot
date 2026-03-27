@@ -49,44 +49,44 @@ def to_text(data):
 
 
 def replace_in_row(data, row_idx, old, new):
-    """Replace text in a specific row, preserving cell styles."""
+    """Replace first occurrence of text in a specific row, preserving cell styles.
+
+    If new is shorter than old, fills remainder with spaces.
+    If new is longer than old, truncates to fit the original span.
+    Returns the column index after the replacement (for chained calls), or -1 if not found.
+    """
     row = data["cells"][row_idx]
     line = "".join(cell.get("char", " ") for cell in row)
     start = line.find(old)
     if start == -1:
-        return False
+        return -1
 
-    # Pad new text or truncate to fit
-    new_padded = new.ljust(len(old))[:len(old)] if len(new) <= len(old) else new
-
-    # If new text is longer, we shift; if shorter, we pad with spaces
-    for i, ch in enumerate(new_padded):
+    span = len(old)
+    for i in range(span):
         col = start + i
         if col < len(row):
-            row[col]["char"] = ch
+            row[col]["char"] = new[i] if i < len(new) else " "
 
-    # If new is shorter than old, fill remainder with spaces
-    if len(new) < len(old):
-        for i in range(len(new), len(old)):
-            col = start + i
-            if col < len(row):
-                row[col]["char"] = " "
-
-    return True
+    return start + span
 
 
 def replace_all(data, old, new):
     """Replace text in all rows."""
     count = 0
     for row_idx in range(len(data["cells"])):
-        # Keep replacing in same row if multiple occurrences
         while True:
-            line = "".join(cell.get("char", " ") for cell in data["cells"][row_idx])
-            if old not in line:
+            row = data["cells"][row_idx]
+            line = "".join(cell.get("char", " ") for cell in row)
+            pos = line.find(old)
+            if pos == -1:
                 break
-            if replace_in_row(data, row_idx, old, new):
-                count += 1
-            else:
+            end = replace_in_row(data, row_idx, old, new)
+            if end == -1:
+                break
+            count += 1
+            # If new contains old, we'd loop forever — check remaining text only
+            remaining = line[end:]
+            if old in new and old not in remaining:
                 break
     return count
 
@@ -154,7 +154,7 @@ def main():
     if args.replace:
         for row_s, old, new in args.replace:
             row_idx = int(row_s)
-            if replace_in_row(data, row_idx, old, new):
+            if replace_in_row(data, row_idx, old, new) >= 0:
                 print(f"Row {row_idx}: '{old}' → '{new}'")
                 modified = True
             else:
