@@ -55,6 +55,8 @@ def replace_in_row(data, row_idx, old, new):
 
 def replace_all(data, old, new):
     """Replace text in all rows."""
+    if not old:
+        return 0
     count = 0
     for row_idx in range(len(data["cells"])):
         while True:
