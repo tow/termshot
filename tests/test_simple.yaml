@@ -1,0 +1,11 @@
+command: "python3 tests/simple_tui.py"
+cols: 60
+rows: 12
+steps:
+  - wait_for: "Type something>"
+    send: "hello from the script{enter}"
+
+  - wait_for: "You said:"
+
+  - wait_for: "Press q to quit"
+    send: "q"

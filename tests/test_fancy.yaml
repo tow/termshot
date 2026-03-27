@@ -1,0 +1,5 @@
+command: "python3 tests/fancy_tui.py"
+cols: 60
+rows: 16
+steps:
+  - wait_for: "Ready"
