@@ -1,9 +1,10 @@
-"""Render captured terminal state to PNG via a headless terminal.
+"""Render captured terminal state to PNG via a real terminal emulator.
 
-Launches Xvfb + a real terminal emulator, cats the ANSI output, and
-screenshots the window with ImageMagick. Prefers urxvt over xterm.
+macOS: launches kitty minimized, captures via screencapture.
+Linux: launches Xvfb + urxvt/xterm, captures via ImageMagick.
 """
 
+import json
 import os
 import shlex
 import shutil
@@ -15,6 +16,127 @@ import time
 from render.ansi import render_ansi
 from capture_data import get_theme
 
+
+def render_png(data, output_path, font_name="DejaVu Sans Mono",
+               font_size=14, terminal=None):
+    """Render terminal state to PNG via a headless terminal.
+
+    On macOS, uses kitty + screencapture.
+    On Linux, uses Xvfb + urxvt/xterm + ImageMagick.
+    """
+    if sys.platform == "darwin":
+        _render_png_kitty(data, output_path, font_name, font_size)
+    else:
+        _render_png_xvfb(data, output_path, font_name, font_size, terminal)
+
+
+# ── macOS: kitty + screencapture ──────────────────────────────────────────────
+
+def _find_kitty():
+    """Find the kitty binary, checking PATH and standard macOS location."""
+    path = shutil.which("kitty")
+    if path:
+        return path
+    mac_path = "/Applications/kitty.app/Contents/MacOS/kitty"
+    if os.path.isfile(mac_path):
+        return mac_path
+    return None
+
+
+def _render_png_kitty(data, output_path, font_name, font_size):
+    """Render via kitty terminal on macOS.
+
+    Launches kitty minimized with remote control, cats the ANSI output,
+    retrieves the OS window ID, and uses screencapture to grab the window.
+    """
+    kitty = _find_kitty()
+    if not kitty:
+        print("Error: kitty not found. Install with: brew install --cask kitty",
+              file=sys.stderr)
+        sys.exit(1)
+    if not shutil.which("screencapture"):
+        print("Error: screencapture not found", file=sys.stderr)
+        sys.exit(1)
+
+    t = get_theme(data)
+    ansi_content = render_ansi(data)
+    cols = data["cols"]
+    rows = data["rows"]
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".ansi", delete=False) as f:
+        f.write(ansi_content)
+        ansi_path = f.name
+
+    sock_dir = tempfile.mkdtemp(prefix="termshot-")
+    sock_path = os.path.join(sock_dir, "kitty.sock")
+
+    kitty_proc = None
+    try:
+        kitty_proc = subprocess.Popen([
+            kitty,
+            "--start-as=minimized",
+            "--listen-on", f"unix:{sock_path}",
+            "-o", "allow_remote_control=yes",
+            "-o", f"font_family={font_name}",
+            "-o", f"font_size={font_size}",
+            "-o", f"background={t['background']}",
+            "-o", f"foreground={t['foreground']}",
+            "-o", f"initial_window_width={cols}c",
+            "-o", f"initial_window_height={rows}c",
+            "-o", "window_padding_width=0",
+            "-o", "hide_window_decorations=yes",
+            "-o", "confirm_os_window_close=0",
+            "-o", "macos_quit_when_last_window_closed=yes",
+            "-e", "bash", "-c",
+            f"printf '\\033[?25l'; cat {shlex.quote(ansi_path)}; sleep 60",
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Wait for the socket to appear (kitty is ready)
+        for _ in range(50):
+            time.sleep(0.1)
+            if os.path.exists(sock_path):
+                break
+        else:
+            print("Error: kitty did not start (socket not created)",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        # Give kitty time to render the content
+        time.sleep(1.5)
+
+        # Get the macOS window ID via kitty remote control
+        result = subprocess.run(
+            [kitty, "@", "--to", f"unix:{sock_path}", "ls"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            print(f"Error: kitty remote control failed: {result.stderr}",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        ls_data = json.loads(result.stdout)
+        window_id = ls_data[0].get("platform_window_id")
+        if not window_id:
+            print("Error: could not get kitty window ID", file=sys.stderr)
+            sys.exit(1)
+
+        # screencapture -l captures by CGWindowID, works even when minimized
+        # -o removes the drop shadow
+        subprocess.run(
+            ["screencapture", "-l", str(window_id), "-o", output_path],
+            check=True,
+        )
+    finally:
+        if kitty_proc:
+            kitty_proc.kill()
+            kitty_proc.wait()
+        os.unlink(ansi_path)
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        os.rmdir(sock_dir)
+
+
+# ── Linux: Xvfb + terminal + ImageMagick ─────────────────────────────────────
 
 def _build_terminal_cmd(terminal, font_name, font_size, bg, fg, cols, rows, ansi_path):
     """Build the command to launch a terminal displaying the ANSI file."""
@@ -55,16 +177,8 @@ def _detect_terminal():
     return None
 
 
-def render_png(data, output_path, font_name="DejaVu Sans Mono",
-               font_size=14, terminal=None):
-    """Render terminal state to PNG via a headless terminal.
-
-    Launches Xvfb + a real terminal emulator, cats the ANSI output, and
-    screenshots the window with ImageMagick. The terminal handles all font
-    rendering, Unicode, colors, and character alignment.
-
-    Prefers urxvt (better Unicode/box-drawing) over xterm.
-    """
+def _render_png_xvfb(data, output_path, font_name, font_size, terminal):
+    """Render via Xvfb + terminal emulator on Linux."""
     for tool in ["Xvfb", "xdotool", "import"]:
         if not shutil.which(tool):
             print(f"Error: {tool} not found. Install with: "
