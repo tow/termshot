@@ -24,56 +24,11 @@ import time
 import pyte
 
 
-ANSI_COLOR_NAMES = {
-    "default": None,
-    "black": "#1e1e2e",
-    "red": "#f38ba8",
-    "green": "#a6e3a1",
-    "brown": "#f9e2af",  # pyte calls yellow "brown"
-    "yellow": "#f9e2af",
-    "blue": "#89b4fa",
-    "magenta": "#cba6f7",
-    "cyan": "#94e2d5",
-    "white": "#cdd6f4",
-    "brightblack": "#585b70",
-    "brightred": "#f38ba8",
-    "brightgreen": "#a6e3a1",
-    "brightyellow": "#f9e2af",
-    "brightblue": "#89b4fa",
-    "brightmagenta": "#cba6f7",
-    "brightcyan": "#94e2d5",
-    "brightwhite": "#ffffff",
-}
-
-
-def resolve_color(color_value):
-    """Convert a pyte color to a hex string."""
+def normalize_color(color_value):
+    """Store the raw pyte color value, only skipping 'default'."""
     if not color_value or color_value == "default":
         return None
-    # Already a hex code
-    if isinstance(color_value, str) and color_value.startswith("#"):
-        return color_value
-    # Named color
-    if isinstance(color_value, str) and color_value.lower() in ANSI_COLOR_NAMES:
-        return ANSI_COLOR_NAMES[color_value.lower()]
-    # 256-color index (pyte gives these as strings like "0"-"255")
-    if isinstance(color_value, str) and color_value.isdigit():
-        idx = int(color_value)
-        if idx < 16:
-            names = list(ANSI_COLOR_NAMES.values())
-            return names[idx + 1] if idx + 1 < len(names) else None
-        # 216 color cube (indices 16-231)
-        if 16 <= idx <= 231:
-            idx -= 16
-            r = (idx // 36) * 51
-            g = ((idx % 36) // 6) * 51
-            b = (idx % 6) * 51
-            return f"#{r:02x}{g:02x}{b:02x}"
-        # Grayscale (indices 232-255)
-        if 232 <= idx <= 255:
-            v = 8 + (idx - 232) * 10
-            return f"#{v:02x}{v:02x}{v:02x}"
-    return None
+    return color_value
 
 
 def capture_command(command, cols, rows, wait_time, input_keys=None):
@@ -153,8 +108,8 @@ def screen_to_dict(screen):
         for x in range(screen.columns):
             char = screen.buffer[y][x]
             cell = {"char": char.data}
-            fg = resolve_color(char.fg)
-            bg = resolve_color(char.bg)
+            fg = normalize_color(char.fg)
+            bg = normalize_color(char.bg)
             if fg:
                 cell["fg"] = fg
             if bg:
@@ -174,15 +129,6 @@ def screen_to_dict(screen):
         "cols": screen.columns,
         "rows": screen.lines,
         "cells": rows,
-        "theme": {
-            "background": "#1e1e2e",
-            "foreground": "#cdd6f4",
-            "font_family": "JetBrains Mono, Fira Code, Menlo, monospace",
-            "font_size": 14,
-            "line_height": 1.4,
-            "padding": 16,
-            "border_radius": 10,
-        },
     }
 
 

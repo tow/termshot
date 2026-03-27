@@ -6,6 +6,14 @@ Usage:
     python3 render.py capture.json -o mockup.svg
     python3 render.py capture.json -o mockup.html
     python3 render.py capture.json -o mockup.svg --title "My App v2.0"
+
+The renderer resolves raw ANSI color names/indices from pyte into hex values
+using the standard xterm-256color palette. The TUI's own colors are preserved
+faithfully — no custom theme is imposed on the captured content.
+
+Rendering options (font, padding, window chrome) can be overridden via a
+"theme" key in the JSON if present, but these only affect the surrounding
+window — never the cell colors.
 """
 
 import argparse
@@ -14,26 +22,95 @@ import json
 import sys
 
 
+# Standard xterm ANSI 16-color palette.
+# pyte uses these names for SGR colors 30-37 / 40-47 / 90-97 / 100-107.
+ANSI_16 = {
+    "black":         "#000000",
+    "red":           "#cd0000",
+    "green":         "#00cd00",
+    "brown":         "#cdcd00",  # pyte calls SGR yellow "brown"
+    "yellow":        "#cdcd00",
+    "blue":          "#0000ee",
+    "magenta":       "#cd00cd",
+    "cyan":          "#00cdcd",
+    "white":         "#e5e5e5",
+    "brightblack":   "#7f7f7f",
+    "brightred":     "#ff0000",
+    "brightgreen":   "#00ff00",
+    "brightyellow":  "#ffff00",
+    "brightblue":    "#5c5cff",
+    "brightmagenta": "#ff00ff",
+    "brightcyan":    "#00ffff",
+    "brightwhite":   "#ffffff",
+}
+
+# Indexed lookup for 256-color indices 0-15 (same order as ANSI_16).
+ANSI_16_BY_INDEX = [
+    "#000000", "#cd0000", "#00cd00", "#cdcd00",
+    "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
+    "#7f7f7f", "#ff0000", "#00ff00", "#ffff00",
+    "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
+]
+
+
+def resolve_color(raw):
+    """Resolve a pyte color value to a CSS hex color, or None for 'default'."""
+    if not raw or raw == "default":
+        return None
+    # Already hex
+    if isinstance(raw, str) and raw.startswith("#"):
+        return raw
+    # Named ANSI color
+    if isinstance(raw, str) and raw.lower() in ANSI_16:
+        return ANSI_16[raw.lower()]
+    # 256-color index (pyte stores these as string digits)
+    if isinstance(raw, str) and raw.isdigit():
+        idx = int(raw)
+        if idx < 16:
+            return ANSI_16_BY_INDEX[idx]
+        if 16 <= idx <= 231:
+            idx -= 16
+            r = (idx // 36) * 51
+            g = ((idx % 36) // 6) * 51
+            b = (idx % 6) * 51
+            return f"#{r:02x}{g:02x}{b:02x}"
+        if 232 <= idx <= 255:
+            v = 8 + (idx - 232) * 10
+            return f"#{v:02x}{v:02x}{v:02x}"
+    return None
+
+
+def _get_theme(data):
+    """Extract rendering theme with defaults. Only affects window chrome, not cell colors."""
+    theme = data.get("theme", {})
+    return {
+        "font_family": theme.get("font_family", "JetBrains Mono, Fira Code, Menlo, monospace"),
+        "font_size": theme.get("font_size", 14),
+        "line_height": theme.get("line_height", 1.4),
+        "padding": theme.get("padding", 16),
+        "border_radius": theme.get("border_radius", 10),
+        "background": theme.get("background", "#1e1e2e"),
+        "foreground": theme.get("foreground", "#cdd6f4"),
+    }
+
+
 def render_svg(data, title=None):
     """Render terminal state to SVG string."""
-    theme = data.get("theme", {})
+    t = _get_theme(data)
     cols = data["cols"]
     rows = data["rows"]
     cells = data["cells"]
 
-    font_family = theme.get("font_family", "JetBrains Mono, Menlo, monospace")
-    font_size = theme.get("font_size", 14)
-    line_height = theme.get("line_height", 1.4)
-    padding = theme.get("padding", 16)
-    border_radius = theme.get("border_radius", 10)
-    bg = theme.get("background", "#1e1e2e")
-    fg = theme.get("foreground", "#cdd6f4")
+    font_family = t["font_family"]
+    font_size = t["font_size"]
+    padding = t["padding"]
+    bg = t["background"]
+    fg = t["foreground"]
 
     char_width = font_size * 0.6
-    row_height = font_size * line_height
+    row_height = font_size * t["line_height"]
 
-    # Title bar height
-    title_bar_h = 40 if title is not None else 36  # always show dots
+    title_bar_h = 40 if title is not None else 36
     content_y = title_bar_h + padding
 
     canvas_w = padding * 2 + cols * char_width
@@ -44,14 +121,12 @@ def render_svg(data, title=None):
                  f'width="{canvas_w}" height="{canvas_h}" '
                  f'viewBox="0 0 {canvas_w} {canvas_h}">')
 
-    # Background with rounded corners
-    parts.append(f'<rect width="{canvas_w}" height="{canvas_h}" rx="{border_radius}" '
+    parts.append(f'<rect width="{canvas_w}" height="{canvas_h}" rx="{t["border_radius"]}" '
                  f'fill="{bg}" />')
 
-    # Window title bar (macOS-style dots)
+    # Window dots
     dot_y = 18
-    dot_colors = ["#ff5f57", "#febc2e", "#28c840"]
-    for i, color in enumerate(dot_colors):
+    for i, color in enumerate(["#ff5f57", "#febc2e", "#28c840"]):
         cx = padding + i * 20
         parts.append(f'<circle cx="{cx}" cy="{dot_y}" r="6" fill="{color}" />')
 
@@ -62,21 +137,18 @@ def render_svg(data, title=None):
                      f'font-family="{font_family}" font-size="{font_size - 1}" '
                      f'fill="{fg}" opacity="0.6">{html.escape(title)}</text>')
 
-    # Separator line
     sep_y = title_bar_h - 2
     parts.append(f'<line x1="0" y1="{sep_y}" x2="{canvas_w}" y2="{sep_y}" '
                  f'stroke="{fg}" stroke-opacity="0.1" />')
 
-    # Render cells
     for y_idx, row in enumerate(cells):
-        # First pass: background rectangles
+        # Background rectangles
         for x_idx, cell in enumerate(row):
-            cell_bg = cell.get("bg")
+            cell_bg = resolve_color(cell.get("bg"))
             is_reverse = cell.get("reverse", False)
-            cell_fg = cell.get("fg", fg)
+            cell_fg = resolve_color(cell.get("fg")) or fg
 
             if is_reverse:
-                # Swap fg/bg for reverse video
                 rect_color = cell_fg
             elif cell_bg:
                 rect_color = cell_bg
@@ -90,7 +162,7 @@ def render_svg(data, title=None):
                              f'width="{char_width}" height="{row_height}" '
                              f'fill="{rect_color}" />')
 
-        # Second pass: text spans — group consecutive same-style chars
+        # Text spans — group consecutive same-style chars
         x = 0
         while x < len(row):
             cell = row[x]
@@ -99,15 +171,13 @@ def render_svg(data, title=None):
                 x += 1
                 continue
 
-            # Collect run of same style
-            style = _cell_style(cell, fg)
+            style = _cell_style(cell)
             run_start = x
             run_chars = [ch]
             x += 1
             while x < len(row):
-                next_cell = row[x]
-                if _cell_style(next_cell, fg) == style:
-                    run_chars.append(next_cell.get("char", " "))
+                if _cell_style(row[x]) == style:
+                    run_chars.append(row[x].get("char", " "))
                     x += 1
                 else:
                     break
@@ -121,9 +191,9 @@ def render_svg(data, title=None):
 
             is_reverse = cell.get("reverse", False)
             if is_reverse:
-                text_color = cell.get("bg", bg)
+                text_color = resolve_color(cell.get("bg")) or bg
             else:
-                text_color = cell.get("fg", fg)
+                text_color = resolve_color(cell.get("fg")) or fg
 
             attrs = [
                 f'x="{tx}"',
@@ -137,9 +207,7 @@ def render_svg(data, title=None):
             if cell.get("italic"):
                 attrs.append('font-style="italic"')
 
-            text_escaped = html.escape(text)
-            # Use xml:space to preserve whitespace in mixed runs
-            parts.append(f'<text {" ".join(attrs)} xml:space="preserve">{text_escaped}</text>')
+            parts.append(f'<text {" ".join(attrs)} xml:space="preserve">{html.escape(text)}</text>')
 
             if cell.get("underline"):
                 uy = ty + 2
@@ -151,10 +219,10 @@ def render_svg(data, title=None):
     return "\n".join(parts)
 
 
-def _cell_style(cell, default_fg):
+def _cell_style(cell):
     """Return a hashable style key for grouping consecutive cells."""
     return (
-        cell.get("fg", default_fg),
+        cell.get("fg"),
         cell.get("bg"),
         cell.get("bold", False),
         cell.get("italic", False),
@@ -165,17 +233,16 @@ def _cell_style(cell, default_fg):
 
 def render_html(data, title=None):
     """Render terminal state to a standalone HTML file."""
-    theme = data.get("theme", {})
-    cols = data["cols"]
+    t = _get_theme(data)
     cells = data["cells"]
 
-    font_family = theme.get("font_family", "JetBrains Mono, Menlo, monospace")
-    font_size = theme.get("font_size", 14)
-    line_height = theme.get("line_height", 1.4)
-    padding = theme.get("padding", 16)
-    border_radius = theme.get("border_radius", 10)
-    bg = theme.get("background", "#1e1e2e")
-    fg = theme.get("foreground", "#cdd6f4")
+    font_family = t["font_family"]
+    font_size = t["font_size"]
+    line_height = t["line_height"]
+    padding = t["padding"]
+    border_radius = t["border_radius"]
+    bg = t["background"]
+    fg = t["foreground"]
 
     title_text = html.escape(title) if title else "Terminal"
 
@@ -185,20 +252,23 @@ def render_html(data, title=None):
         for cell in row:
             ch = cell.get("char", " ")
             styles = []
-            if cell.get("fg"):
-                styles.append(f"color:{cell['fg']}")
-            if cell.get("bg"):
-                styles.append(f"background:{cell['bg']}")
+            resolved_fg = resolve_color(cell.get("fg"))
+            resolved_bg = resolve_color(cell.get("bg"))
+
+            if cell.get("reverse"):
+                styles.append(f"color:{resolved_bg or bg};background:{resolved_fg or fg}")
+            else:
+                if resolved_fg:
+                    styles.append(f"color:{resolved_fg}")
+                if resolved_bg:
+                    styles.append(f"background:{resolved_bg}")
+
             if cell.get("bold"):
                 styles.append("font-weight:bold")
             if cell.get("italic"):
                 styles.append("font-style:italic")
             if cell.get("underline"):
                 styles.append("text-decoration:underline")
-            if cell.get("reverse"):
-                fg_c = cell.get("fg", fg)
-                bg_c = cell.get("bg", bg)
-                styles.append(f"color:{bg_c};background:{fg_c}")
 
             if styles:
                 spans.append(f'<span style="{";".join(styles)}">{html.escape(ch)}</span>')
