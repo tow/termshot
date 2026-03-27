@@ -12,9 +12,9 @@ Examples:
 """
 
 import argparse
-import json
 
 from session import Session
+from capture_data import save
 
 
 def main():
@@ -32,8 +32,7 @@ def main():
         sess.wait_for_stable(settle_time=args.wait)
         data = sess.to_dict()
 
-    with open(args.output, "w") as f:
-        json.dump(data, f, indent=2)
+    save(data, args.output)
     print(f"Saved to {args.output}")
     print(f"Now edit the JSON, then run: python3 render.py {args.output} -o mockup.png")
 

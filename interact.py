@@ -32,31 +32,32 @@ Script format (YAML):
     # The final screen state is always saved to the -o output file.
 
 Named keys shorthand (use in send values):
-    {enter}     → \\r
-    {tab}       → \\t
-    {escape}    → \\x1b
-    {up}        → \\x1b[A
-    {down}      → \\x1b[B
-    {right}     → \\x1b[C
-    {left}      → \\x1b[D
-    {backspace} → \\x7f
-    {delete}    → \\x1b[3~
-    {home}      → \\x1b[H
-    {end}       → \\x1b[F
-    {ctrl+c}    → \\x03
-    {ctrl+d}    → \\x04
-    {ctrl+z}    → \\x1a
+    {enter}     -> \\r
+    {tab}       -> \\t
+    {escape}    -> \\x1b
+    {up}        -> \\x1b[A
+    {down}      -> \\x1b[B
+    {right}     -> \\x1b[C
+    {left}      -> \\x1b[D
+    {backspace} -> \\x7f
+    {delete}    -> \\x1b[3~
+    {home}      -> \\x1b[H
+    {end}       -> \\x1b[F
+    {ctrl+c}    -> \\x03
+    {ctrl+d}    -> \\x04
+    {ctrl+z}    -> \\x1a
 """
 
 import argparse
-import json
 import re
 import sys
 
 import yaml
 
 from session import Session
+from capture_data import save
 
+VALID_STEP_KEYS = {"wait_for", "wait_for_stable", "send", "snapshot", "timeout", "required"}
 
 NAMED_KEYS = {
     "{enter}":     "\r",
@@ -93,9 +94,8 @@ def expand_keys(text):
 def save_snapshot(sess, path):
     """Save current screen state to a JSON file."""
     data = sess.to_dict()
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-    print(f"  snapshot → {path}")
+    save(data, path)
+    print(f"  snapshot -> {path}")
 
 
 def run_script(script_path, output_path):
@@ -106,6 +106,14 @@ def run_script(script_path, output_path):
     cols = script.get("cols", 80)
     rows = script.get("rows", 24)
     steps = script.get("steps", [])
+
+    # Validate step keys
+    for i, step in enumerate(steps):
+        unknown = set(step.keys()) - VALID_STEP_KEYS
+        if unknown:
+            print(f"Error: step {i + 1} has unknown keys: {unknown} "
+                  f"(valid: {sorted(VALID_STEP_KEYS)})", file=sys.stderr)
+            sys.exit(1)
 
     print(f"Running: {command} ({cols}x{rows}), {len(steps)} steps")
 
@@ -161,8 +169,7 @@ def run_script(script_path, output_path):
         sess.wait_for_stable(settle_time=0.5)
         data = sess.to_dict()
 
-    with open(output_path, "w") as f:
-        json.dump(data, f, indent=2)
+    save(data, output_path)
     print(f"Saved final state to {output_path}")
 
 

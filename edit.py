@@ -26,26 +26,9 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 
-
-def load(path):
-    with open(path) as f:
-        return json.load(f)
-
-
-def save(data, path):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def to_text(data):
-    """Convert capture to plain text for inspection."""
-    lines = []
-    for row in data["cells"]:
-        lines.append("".join(cell.get("char", " ") for cell in row).rstrip())
-    return "\n".join(lines)
+from capture_data import load, save, to_text
 
 
 def replace_in_row(data, row_idx, old, new):
@@ -84,7 +67,7 @@ def replace_all(data, old, new):
             if end == -1:
                 break
             count += 1
-            # If new contains old, we'd loop forever — check remaining text only
+            # If new contains old, we'd loop forever -- check remaining text only
             remaining = line[end:]
             if old in new and old not in remaining:
                 break
@@ -146,7 +129,7 @@ def main():
         for old, new in args.replace_all:
             n = replace_all(data, old, new)
             if n:
-                print(f"Replaced {n} occurrence(s) of '{old}' → '{new}'")
+                print(f"Replaced {n} occurrence(s) of '{old}' \u2192 '{new}'")
                 modified = True
             else:
                 print(f"Warning: '{old}' not found", file=sys.stderr)
@@ -155,7 +138,7 @@ def main():
         for row_s, old, new in args.replace:
             row_idx = int(row_s)
             if replace_in_row(data, row_idx, old, new) >= 0:
-                print(f"Row {row_idx}: '{old}' → '{new}'")
+                print(f"Row {row_idx}: '{old}' \u2192 '{new}'")
                 modified = True
             else:
                 print(f"Warning: '{old}' not found in row {row_idx}", file=sys.stderr)

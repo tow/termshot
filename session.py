@@ -15,12 +15,7 @@ import time
 
 import pyte
 
-
-def normalize_color(color_value):
-    """Store the raw pyte color value, only skipping 'default'."""
-    if not color_value or color_value == "default":
-        return None
-    return color_value
+from colors import normalize_color
 
 
 class Session:

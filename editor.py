@@ -4,7 +4,7 @@ In-place terminal editor for captured screen states.
 
 Opens a terminal sized exactly to the capture, renders it with full colors,
 and lets you edit text directly. Styles (colors, bold, etc.) are preserved
-from the original cell — you're just changing the characters.
+from the original cell -- you're just changing the characters.
 
 Usage:
     python3 editor.py capture.json -o edited.json
@@ -22,48 +22,10 @@ Controls:
 
 import argparse
 import curses
-import json
 import sys
 
-
-def color_to_curses(raw):
-    """Convert a raw pyte color to curses color init args.
-
-    Returns (r, g, b) scaled to 0-1000 for curses, or None for default.
-    """
-    if not raw or raw == "default":
-        return None
-
-    # Named ANSI colors
-    ANSI_NAMES = {
-        "black": (0, 0, 0), "red": (205, 0, 0), "green": (0, 205, 0),
-        "brown": (205, 205, 0), "yellow": (205, 205, 0),
-        "blue": (0, 0, 238), "magenta": (205, 0, 205),
-        "cyan": (0, 205, 205), "white": (229, 229, 229),
-        "brightblack": (127, 127, 127), "brightred": (255, 0, 0),
-        "brightgreen": (0, 255, 0), "brightyellow": (255, 255, 0),
-        "brightblue": (92, 92, 255), "brightmagenta": (255, 0, 255),
-        "brightcyan": (0, 255, 255), "brightwhite": (255, 255, 255),
-    }
-
-    if isinstance(raw, str) and raw.lower() in ANSI_NAMES:
-        r, g, b = ANSI_NAMES[raw.lower()]
-        return (r * 1000 // 255, g * 1000 // 255, b * 1000 // 255)
-
-    # Bare hex or #hex
-    if isinstance(raw, str):
-        h = raw.lstrip("#")
-        if len(h) == 6:
-            try:
-                int(h, 16)
-                r = int(h[0:2], 16)
-                g = int(h[2:4], 16)
-                b = int(h[4:6], 16)
-                return (r * 1000 // 255, g * 1000 // 255, b * 1000 // 255)
-            except ValueError:
-                pass
-
-    return None
+from colors import color_to_curses
+from capture_data import load, save
 
 
 class Editor:
@@ -113,7 +75,6 @@ class Editor:
             return fallback
 
         if not curses.can_change_color():
-            # Can't define custom colors, map to nearest basic
             return self._nearest_basic(rgb)
 
         color_id = self._next_color
@@ -253,7 +214,7 @@ class Editor:
 
             key = stdscr.getch()
 
-            # Navigation (arrow keys only — all printable keys type)
+            # Navigation (arrow keys only -- all printable keys type)
             if key == curses.KEY_UP and self.cursor_y > 0:
                 self.cursor_y -= 1
             elif key == curses.KEY_DOWN and self.cursor_y < self.rows - 1:
@@ -296,18 +257,16 @@ class Editor:
                 if self.cursor_x < self.cols - 1:
                     self.cursor_x += 1
 
-    def save(self, path):
-        """Save the edited state to JSON."""
+    def to_dict(self):
+        """Serialize editor state back to a capture data dict."""
         out = {
             "cols": self.cols,
             "rows": self.rows,
             "cells": self.cells,
         }
-        # Preserve theme if present
         if "theme" in self.data:
             out["theme"] = self.data["theme"]
-        with open(path, "w") as f:
-            json.dump(out, f, indent=2)
+        return out
 
 
 def main():
@@ -316,9 +275,7 @@ def main():
     parser.add_argument("-o", "--output", help="Output JSON file (default: overwrite input)")
     args = parser.parse_args()
 
-    with open(args.input) as f:
-        data = json.load(f)
-
+    data = load(args.input)
     output_path = args.output or args.input
     editor = Editor(data)
 
@@ -328,7 +285,7 @@ def main():
     should_save = curses.wrapper(wrapped)
 
     if should_save:
-        editor.save(output_path)
+        save(editor.to_dict(), output_path)
         print(f"Saved to {output_path}")
     else:
         if editor.modified:
