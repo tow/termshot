@@ -22,8 +22,12 @@ import json
 import sys
 
 
-# Standard xterm ANSI 16-color palette.
-# pyte uses these names for SGR colors 30-37 / 40-47 / 90-97 / 100-107.
+# Fallback for the 16 basic ANSI named colors.
+# These are the ONLY colors that are terminal-theme-dependent — the actual
+# shade of "blue" or "red" varies by terminal emulator and color scheme.
+# We use xterm defaults here. Apps that care about exact colors use
+# truecolor (24-bit RGB) or 256-color indices instead, both of which pyte
+# resolves to exact hex values that pass through without any mapping.
 ANSI_16 = {
     "black":         "#000000",
     "red":           "#cd0000",
@@ -44,39 +48,40 @@ ANSI_16 = {
     "brightwhite":   "#ffffff",
 }
 
-# Indexed lookup for 256-color indices 0-15 (same order as ANSI_16).
-ANSI_16_BY_INDEX = [
-    "#000000", "#cd0000", "#00cd00", "#cdcd00",
-    "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
-    "#7f7f7f", "#ff0000", "#00ff00", "#ffff00",
-    "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
-]
+
+def _is_bare_hex(s):
+    """Check if string is a bare hex color (6 hex digits, no # prefix)."""
+    if len(s) != 6:
+        return False
+    try:
+        int(s, 16)
+        return True
+    except ValueError:
+        return False
 
 
 def resolve_color(raw):
-    """Resolve a pyte color value to a CSS hex color, or None for 'default'."""
+    """Resolve a pyte color value to a CSS hex color, or None for 'default'.
+
+    pyte stores colors in three formats:
+    - True color (24-bit RGB): bare hex like 'ff8c00'
+    - 256-color: also resolved to bare hex by pyte (e.g. 'ff8700')
+    - Basic 16 ANSI: a name like 'red', 'blue', 'brown'
+
+    True color and 256-color values pass through exactly — the TUI's own
+    colors are preserved. Only the 16 named ANSI colors need mapping, and
+    those are terminal-theme-dependent (we use xterm defaults).
+    """
     if not raw or raw == "default":
         return None
-    # Already hex
     if isinstance(raw, str) and raw.startswith("#"):
         return raw
-    # Named ANSI color
+    # Bare hex from pyte (truecolor and 256-color both arrive this way)
+    if isinstance(raw, str) and _is_bare_hex(raw):
+        return f"#{raw}"
+    # Named ANSI color (the only theme-dependent case)
     if isinstance(raw, str) and raw.lower() in ANSI_16:
         return ANSI_16[raw.lower()]
-    # 256-color index (pyte stores these as string digits)
-    if isinstance(raw, str) and raw.isdigit():
-        idx = int(raw)
-        if idx < 16:
-            return ANSI_16_BY_INDEX[idx]
-        if 16 <= idx <= 231:
-            idx -= 16
-            r = (idx // 36) * 51
-            g = ((idx % 36) // 6) * 51
-            b = (idx % 6) * 51
-            return f"#{r:02x}{g:02x}{b:02x}"
-        if 232 <= idx <= 255:
-            v = 8 + (idx - 232) * 10
-            return f"#{v:02x}{v:02x}{v:02x}"
     return None
 
 
