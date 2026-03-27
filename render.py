@@ -488,24 +488,27 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
         f.write(ansi_content)
         ansi_path = f.name
 
-    # Find a free display number by checking lock files
-    display_num = None
-    for candidate in range(10, 100):
-        if not os.path.exists(f"/tmp/.X{candidate}-lock"):
-            display_num = candidate
-            break
-    if display_num is None:
-        print("Error: no free X display number found", file=sys.stderr)
-        sys.exit(1)
-
     xvfb = None
     term_proc = None
     try:
-        xvfb = subprocess.Popen(
-            ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        time.sleep(0.5)
+        # Launch Xvfb on a free display, retrying on collision
+        for candidate in range(10, 100):
+            if os.path.exists(f"/tmp/.X{candidate}-lock"):
+                continue
+            proc = subprocess.Popen(
+                ["Xvfb", f":{candidate}", "-screen", "0", "1920x1080x24"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.3)
+            if proc.poll() is not None:
+                # Xvfb exited immediately — display was taken (race), try next
+                continue
+            xvfb = proc
+            display_num = candidate
+            break
+        if xvfb is None:
+            print("Error: could not start Xvfb on any display :10-:99", file=sys.stderr)
+            sys.exit(1)
 
         env = os.environ.copy()
         env["DISPLAY"] = f":{display_num}"

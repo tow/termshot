@@ -6,6 +6,7 @@ import fcntl
 import os
 import pty
 import select
+import shlex
 import signal
 import struct
 import subprocess
@@ -42,9 +43,9 @@ class Session:
         env["COLUMNS"] = str(cols)
         env["LINES"] = str(rows)
 
+        argv = shlex.split(command) if isinstance(command, str) else list(command)
         self.proc = subprocess.Popen(
-            command,
-            shell=True,
+            argv,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
