@@ -329,6 +329,88 @@ pre {{
 </html>"""
 
 
+def _color_to_ansi_fg(raw):
+    """Convert a raw pyte color to an ANSI foreground escape sequence."""
+    if not raw or raw == "default":
+        return ""
+    # Named ANSI color → use standard SGR codes
+    names_fg = {
+        "black": "30", "red": "31", "green": "32", "brown": "33",
+        "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37",
+        "brightblack": "90", "brightred": "91", "brightgreen": "92",
+        "brightyellow": "93", "brightblue": "94", "brightmagenta": "95",
+        "brightcyan": "96", "brightwhite": "97",
+    }
+    if isinstance(raw, str) and raw.lower() in names_fg:
+        return f"\x1b[{names_fg[raw.lower()]}m"
+    # Bare hex (truecolor from pyte) or #hex
+    hex_val = raw.lstrip("#") if isinstance(raw, str) else raw
+    if isinstance(hex_val, str) and len(hex_val) == 6 and _is_bare_hex(hex_val):
+        r, g, b = int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
+        return f"\x1b[38;2;{r};{g};{b}m"
+    return ""
+
+
+def _color_to_ansi_bg(raw):
+    """Convert a raw pyte color to an ANSI background escape sequence."""
+    if not raw or raw == "default":
+        return ""
+    names_bg = {
+        "black": "40", "red": "41", "green": "42", "brown": "43",
+        "yellow": "43", "blue": "44", "magenta": "45", "cyan": "46", "white": "47",
+        "brightblack": "100", "brightred": "101", "brightgreen": "102",
+        "brightyellow": "103", "brightblue": "104", "brightmagenta": "105",
+        "brightcyan": "106", "brightwhite": "107",
+    }
+    if isinstance(raw, str) and raw.lower() in names_bg:
+        return f"\x1b[{names_bg[raw.lower()]}m"
+    hex_val = raw.lstrip("#") if isinstance(raw, str) else raw
+    if isinstance(hex_val, str) and len(hex_val) == 6 and _is_bare_hex(hex_val):
+        r, g, b = int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
+        return f"\x1b[48;2;{r};{g};{b}m"
+    return ""
+
+
+def render_ansi(data):
+    """Convert captured JSON back to raw ANSI escape sequences.
+
+    Output can be cat'd in any terminal for pixel-perfect rendering,
+    then screenshotted with the terminal's own font and theme.
+    """
+    lines = []
+    for row in data["cells"]:
+        parts = []
+        prev_style = None
+        for cell in row:
+            # Build style string for this cell
+            sgr = ""
+            sgr += _color_to_ansi_fg(cell.get("fg"))
+            sgr += _color_to_ansi_bg(cell.get("bg"))
+            if cell.get("bold"):
+                sgr += "\x1b[1m"
+            if cell.get("italic"):
+                sgr += "\x1b[3m"
+            if cell.get("underline"):
+                sgr += "\x1b[4m"
+            if cell.get("reverse"):
+                sgr += "\x1b[7m"
+
+            # Only emit reset + new style when style changes
+            if sgr != prev_style:
+                parts.append("\x1b[0m" + sgr)
+                prev_style = sgr
+
+            parts.append(cell.get("char", " "))
+
+        parts.append("\x1b[0m")  # reset at end of line
+        lines.append("".join(parts))
+
+    # Clear screen, move to top, draw, then leave cursor below
+    output = "\x1b[2J\x1b[H"  # clear + home
+    output += "\n".join(lines)
+    return output
+
+
 def _find_font(bold=False):
     """Find a monospace TTF font with good Unicode coverage."""
     candidates = [
@@ -480,8 +562,12 @@ def main():
             f.write(result)
     elif ext == ".png":
         render_png(data, args.output, title=args.title, scale=args.scale)
+    elif ext == ".ansi":
+        result = render_ansi(data)
+        with open(args.output, "w") as f:
+            f.write(result)
     else:
-        print("Output must be .svg, .html, or .png", file=sys.stderr)
+        print("Output must be .svg, .html, .png, or .ansi", file=sys.stderr)
         sys.exit(1)
 
     print(f"Rendered {args.output} ({len(data['cells'])} rows × {data['cols']} cols)")
