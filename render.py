@@ -19,6 +19,7 @@ window — never the cell colors.
 import argparse
 import html
 import json
+import os
 import sys
 
 
@@ -328,27 +329,161 @@ pre {{
 </html>"""
 
 
+def _find_font(bold=False):
+    """Find a monospace TTF font with good Unicode coverage."""
+    candidates = [
+        # Prefer DejaVu — excellent Unicode coverage (box drawing, braille, symbols)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def render_png(data, output_path, title=None, scale=2):
+    """Render terminal state to PNG with Pillow.
+
+    Draws each character cell directly using a monospace font.
+    Scale factor controls resolution (2 = retina).
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    t = _get_theme(data)
+    cols = data["cols"]
+    rows = data["rows"]
+    cells = data["cells"]
+
+    font_size = t["font_size"] * scale
+    padding = t["padding"] * scale
+    bg = t["background"]
+    fg = t["foreground"]
+    border_radius = t["border_radius"] * scale
+
+    font_path = _find_font(bold=False)
+    bold_font_path = _find_font(bold=True)
+
+    if font_path:
+        font = ImageFont.truetype(font_path, font_size)
+        bold_font = ImageFont.truetype(bold_font_path or font_path, font_size)
+    else:
+        font = ImageFont.load_default()
+        bold_font = font
+
+    # Measure character cell size from the font
+    bbox = font.getbbox("M")
+    char_w = bbox[2] - bbox[0]
+    char_h = int(font_size * t["line_height"])
+
+    # Title bar
+    title_bar_h = int(40 * scale) if title else int(36 * scale)
+    content_y = title_bar_h + padding
+
+    canvas_w = padding * 2 + cols * char_w
+    canvas_h = content_y + rows * char_h + padding
+
+    img = Image.new("RGB", (canvas_w, canvas_h), bg)
+    draw = ImageDraw.Draw(img)
+
+    # Round corners — draw rounded rect background
+    draw.rounded_rectangle(
+        [(0, 0), (canvas_w - 1, canvas_h - 1)],
+        radius=border_radius,
+        fill=bg,
+    )
+
+    # Window dots
+    dot_r = 6 * scale
+    dot_y = 18 * scale
+    for i, color in enumerate(["#ff5f57", "#febc2e", "#28c840"]):
+        cx = padding + i * 20 * scale
+        draw.ellipse(
+            [cx - dot_r, dot_y - dot_r, cx + dot_r, dot_y + dot_r],
+            fill=color,
+        )
+
+    # Title text
+    if title:
+        title_font = ImageFont.truetype(font_path, int(font_size * 0.9)) if font_path else font
+        tb = title_font.getbbox(title)
+        tw = tb[2] - tb[0]
+        draw.text(
+            ((canvas_w - tw) // 2, dot_y - int(font_size * 0.35)),
+            title,
+            fill=fg + "99",  # slight transparency via alpha hex
+            font=title_font,
+        )
+
+    # Separator line
+    sep_y = title_bar_h - 2 * scale
+    draw.line([(0, sep_y), (canvas_w, sep_y)], fill=fg + "1a", width=1)
+
+    # Draw cells
+    for y_idx, row in enumerate(cells):
+        for x_idx, cell in enumerate(row):
+            px = padding + x_idx * char_w
+            py = content_y + y_idx * char_h
+
+            # Background
+            cell_bg = resolve_color(cell.get("bg"))
+            cell_fg_color = resolve_color(cell.get("fg")) or fg
+            is_reverse = cell.get("reverse", False)
+
+            if is_reverse:
+                rect_color = cell_fg_color
+                text_color = resolve_color(cell.get("bg")) or bg
+            else:
+                rect_color = cell_bg
+                text_color = cell_fg_color
+
+            if rect_color:
+                draw.rectangle([px, py, px + char_w, py + char_h], fill=rect_color)
+
+            # Character
+            ch = cell.get("char", " ")
+            if ch and ch != " ":
+                use_font = bold_font if cell.get("bold") else font
+                draw.text((px, py), ch, fill=text_color, font=use_font)
+
+                # Underline
+                if cell.get("underline"):
+                    uy = py + char_h - 2 * scale
+                    draw.line([(px, uy), (px + char_w, uy)], fill=text_color, width=scale)
+
+    img.save(output_path)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Render terminal JSON to SVG/HTML")
+    parser = argparse.ArgumentParser(description="Render terminal JSON to SVG/HTML/PNG")
     parser.add_argument("input", help="Input JSON file from capture.py")
     parser.add_argument("-o", "--output", required=True,
-                        help="Output file (.svg or .html)")
+                        help="Output file (.svg, .html, or .png)")
     parser.add_argument("--title", help="Window title text")
+    parser.add_argument("--scale", type=int, default=2,
+                        help="PNG pixel scale factor (default 2 for retina)")
     args = parser.parse_args()
 
     with open(args.input) as f:
         data = json.load(f)
 
-    if args.output.endswith(".html"):
+    ext = os.path.splitext(args.output)[1].lower()
+    if ext == ".html":
         result = render_html(data, title=args.title)
-    elif args.output.endswith(".svg"):
+        with open(args.output, "w") as f:
+            f.write(result)
+    elif ext == ".svg":
         result = render_svg(data, title=args.title)
+        with open(args.output, "w") as f:
+            f.write(result)
+    elif ext == ".png":
+        render_png(data, args.output, title=args.title, scale=args.scale)
     else:
-        print("Output must be .svg or .html", file=sys.stderr)
+        print("Output must be .svg, .html, or .png", file=sys.stderr)
         sys.exit(1)
 
-    with open(args.output, "w") as f:
-        f.write(result)
     print(f"Rendered {args.output} ({len(data['cells'])} rows × {data['cols']} cols)")
 
 
