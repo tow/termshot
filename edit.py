@@ -98,21 +98,30 @@ def clear_row(data, row_idx):
         cell["char"] = " "
 
 
+class _OrderedAction(argparse.Action):
+    """Record edit operations in the order they appear on the command line."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if not hasattr(namespace, "_ops"):
+            namespace._ops = []
+        namespace._ops.append((self.dest, values))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Edit captured terminal JSON")
     parser.add_argument("input", help="Input JSON file")
     parser.add_argument("-o", "--output", help="Output JSON file")
     parser.add_argument("--print", action="store_true", help="Print as plain text")
-    parser.add_argument("--replace", nargs=3, action="append",
+    parser.add_argument("--replace", nargs=3, action=_OrderedAction,
                         metavar=("ROW", "OLD", "NEW"),
                         help="Replace text in a specific row")
-    parser.add_argument("--replace-all", nargs=2, action="append",
+    parser.add_argument("--replace-all", nargs=2, action=_OrderedAction,
                         metavar=("OLD", "NEW"),
                         help="Replace text in all rows")
-    parser.add_argument("--set", nargs=3, action="append",
+    parser.add_argument("--set", nargs=3, action=_OrderedAction,
                         metavar=("ROW", "COL", "TEXT"),
                         help="Set text at position")
-    parser.add_argument("--clear-row", type=int, action="append",
+    parser.add_argument("--clear-row", nargs=1, type=int, action=_OrderedAction,
                         metavar="ROW",
                         help="Clear a row")
     args = parser.parse_args()
@@ -123,34 +132,33 @@ def main():
         print(to_text(data))
         return
 
+    ops = getattr(args, "_ops", [])
     modified = False
 
-    if args.replace_all:
-        for old, new in args.replace_all:
+    for op, values in ops:
+        if op == "replace_all":
+            old, new = values
             n = replace_all(data, old, new)
             if n:
                 print(f"Replaced {n} occurrence(s) of '{old}' \u2192 '{new}'")
                 modified = True
             else:
                 print(f"Warning: '{old}' not found", file=sys.stderr)
-
-    if args.replace:
-        for row_s, old, new in args.replace:
+        elif op == "replace":
+            row_s, old, new = values
             row_idx = int(row_s)
             if replace_in_row(data, row_idx, old, new) >= 0:
                 print(f"Row {row_idx}: '{old}' \u2192 '{new}'")
                 modified = True
             else:
                 print(f"Warning: '{old}' not found in row {row_idx}", file=sys.stderr)
-
-    if args.set:
-        for row_s, col_s, text in args.set:
+        elif op == "set":
+            row_s, col_s, text = values
             set_text(data, int(row_s), int(col_s), text)
             print(f"Set ({row_s},{col_s}): '{text}'")
             modified = True
-
-    if args.clear_row:
-        for row_idx in args.clear_row:
+        elif op == "clear_row":
+            row_idx = values[0]
             clear_row(data, row_idx)
             print(f"Cleared row {row_idx}")
             modified = True
