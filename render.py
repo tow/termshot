@@ -405,147 +405,97 @@ def render_ansi(data):
         parts.append("\x1b[0m")  # reset at end of line
         lines.append("".join(parts))
 
-    # Clear screen, move to top, draw, then leave cursor below
-    output = "\x1b[2J\x1b[H"  # clear + home
-    output += "\n".join(lines)
-    return output
+    return "\n".join(lines)
 
 
-def _find_font(bold=False):
-    """Find a monospace TTF font with good Unicode coverage."""
-    candidates = [
-        # Prefer DejaVu — excellent Unicode coverage (box drawing, braille, symbols)
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" if bold
-        else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf" if bold
-        else "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
+def render_png(data, output_path, title=None, scale=2, font_name="DejaVu Sans Mono", font_size=14):
+    """Render terminal state to PNG via a headless xterm.
 
-
-def render_png(data, output_path, title=None, scale=2):
-    """Render terminal state to PNG with Pillow.
-
-    Draws each character cell directly using a monospace font.
-    Scale factor controls resolution (2 = retina).
+    Launches Xvfb + xterm, cats the ANSI output, and screenshots the
+    window with ImageMagick. The real terminal handles all font rendering,
+    Unicode, colors, and character alignment.
     """
-    from PIL import Image, ImageDraw, ImageFont
+    import shutil
+    import subprocess
+    import tempfile
 
-    t = _get_theme(data)
+    for tool in ["Xvfb", "xterm", "xdotool", "import"]:
+        if not shutil.which(tool):
+            print(f"Error: {tool} not found. Install with: apt-get install xvfb xterm xdotool imagemagick",
+                  file=sys.stderr)
+            sys.exit(1)
+
+    ansi_content = render_ansi(data)
     cols = data["cols"]
     rows = data["rows"]
-    cells = data["cells"]
 
-    font_size = t["font_size"] * scale
-    padding = t["padding"] * scale
-    bg = t["background"]
-    fg = t["foreground"]
-    border_radius = t["border_radius"] * scale
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".ansi", delete=False) as f:
+        f.write(ansi_content)
+        ansi_path = f.name
 
-    font_path = _find_font(bold=False)
-    bold_font_path = _find_font(bold=True)
+    display_num = 99
+    xvfb = None
+    try:
+        # Start virtual X display
+        xvfb = subprocess.Popen(
+            ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        import time
+        time.sleep(0.5)
 
-    if font_path:
-        font = ImageFont.truetype(font_path, font_size)
-        bold_font = ImageFont.truetype(bold_font_path or font_path, font_size)
-    else:
-        font = ImageFont.load_default()
-        bold_font = font
+        env = os.environ.copy()
+        env["DISPLAY"] = f":{display_num}"
 
-    # Measure character cell size from the font
-    bbox = font.getbbox("M")
-    char_w = bbox[2] - bbox[0]
-    char_h = int(font_size * t["line_height"])
+        # Launch xterm with the ANSI content
+        xterm = subprocess.Popen(
+            [
+                "xterm",
+                "-fa", font_name,
+                "-fs", str(font_size),
+                "-bg", "#1e1e2e",
+                "-fg", "#cdd6f4",
+                "-geometry", f"{cols + 2}x{rows + 1}",
+                "+sb",  # no scrollbar
+                "-b", "0",  # no internal border
+                "-bw", "0",  # no window border
+                "-e", f"printf '\\033[?25l'; cat {ansi_path}; sleep 10",
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(2)  # let xterm render fully
 
-    # Title bar
-    title_bar_h = int(40 * scale) if title else int(36 * scale)
-    content_y = title_bar_h + padding
+        # Find the xterm window
+        result = subprocess.run(
+            ["xdotool", "search", "--pid", str(xterm.pid)],
+            env=env, capture_output=True, text=True,
+        )
+        window_id = result.stdout.strip().split("\n")[0]
 
-    canvas_w = padding * 2 + cols * char_w
-    canvas_h = content_y + rows * char_h + padding
-
-    img = Image.new("RGB", (canvas_w, canvas_h), bg)
-    draw = ImageDraw.Draw(img)
-
-    # Round corners — draw rounded rect background
-    draw.rounded_rectangle(
-        [(0, 0), (canvas_w - 1, canvas_h - 1)],
-        radius=border_radius,
-        fill=bg,
-    )
-
-    # Window dots
-    dot_r = 6 * scale
-    dot_y = 18 * scale
-    for i, color in enumerate(["#ff5f57", "#febc2e", "#28c840"]):
-        cx = padding + i * 20 * scale
-        draw.ellipse(
-            [cx - dot_r, dot_y - dot_r, cx + dot_r, dot_y + dot_r],
-            fill=color,
+        # Screenshot it
+        subprocess.run(
+            ["import", "-window", window_id, output_path],
+            env=env, check=True,
         )
 
-    # Title text
-    if title:
-        title_font = ImageFont.truetype(font_path, int(font_size * 0.9)) if font_path else font
-        tb = title_font.getbbox(title)
-        tw = tb[2] - tb[0]
-        draw.text(
-            ((canvas_w - tw) // 2, dot_y - int(font_size * 0.35)),
-            title,
-            fill=fg + "99",  # slight transparency via alpha hex
-            font=title_font,
-        )
-
-    # Separator line
-    sep_y = title_bar_h - 2 * scale
-    draw.line([(0, sep_y), (canvas_w, sep_y)], fill=fg + "1a", width=1)
-
-    # Draw cells
-    for y_idx, row in enumerate(cells):
-        for x_idx, cell in enumerate(row):
-            px = padding + x_idx * char_w
-            py = content_y + y_idx * char_h
-
-            # Background
-            cell_bg = resolve_color(cell.get("bg"))
-            cell_fg_color = resolve_color(cell.get("fg")) or fg
-            is_reverse = cell.get("reverse", False)
-
-            if is_reverse:
-                rect_color = cell_fg_color
-                text_color = resolve_color(cell.get("bg")) or bg
-            else:
-                rect_color = cell_bg
-                text_color = cell_fg_color
-
-            if rect_color:
-                draw.rectangle([px, py, px + char_w, py + char_h], fill=rect_color)
-
-            # Character
-            ch = cell.get("char", " ")
-            if ch and ch != " ":
-                use_font = bold_font if cell.get("bold") else font
-                draw.text((px, py), ch, fill=text_color, font=use_font)
-
-                # Underline
-                if cell.get("underline"):
-                    uy = py + char_h - 2 * scale
-                    draw.line([(px, uy), (px + char_w, uy)], fill=text_color, width=scale)
-
-    img.save(output_path)
+        xterm.kill()
+    finally:
+        if xvfb:
+            xvfb.kill()
+        os.unlink(ansi_path)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Render terminal JSON to SVG/HTML/PNG")
+    parser = argparse.ArgumentParser(description="Render terminal JSON to SVG/HTML/PNG/ANSI")
     parser.add_argument("input", help="Input JSON file from capture.py")
     parser.add_argument("-o", "--output", required=True,
-                        help="Output file (.svg, .html, or .png)")
-    parser.add_argument("--title", help="Window title text")
-    parser.add_argument("--scale", type=int, default=2,
-                        help="PNG pixel scale factor (default 2 for retina)")
+                        help="Output file (.svg, .html, .png, or .ansi)")
+    parser.add_argument("--title", help="Window title text (SVG/HTML only)")
+    parser.add_argument("--font", default="DejaVu Sans Mono",
+                        help="Font name for PNG rendering (default: DejaVu Sans Mono)")
+    parser.add_argument("--font-size", type=int, default=14,
+                        help="Font size for PNG rendering (default: 14)")
     args = parser.parse_args()
 
     with open(args.input) as f:
@@ -561,7 +511,8 @@ def main():
         with open(args.output, "w") as f:
             f.write(result)
     elif ext == ".png":
-        render_png(data, args.output, title=args.title, scale=args.scale)
+        render_png(data, args.output, title=args.title,
+                   font_name=args.font, font_size=args.font_size)
     elif ext == ".ansi":
         result = render_ansi(data)
         with open(args.output, "w") as f:
