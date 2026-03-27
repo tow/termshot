@@ -408,23 +408,74 @@ def render_ansi(data):
     return "\n".join(lines)
 
 
-def render_png(data, output_path, title=None, scale=2, font_name="DejaVu Sans Mono", font_size=14):
-    """Render terminal state to PNG via a headless xterm.
+def _build_terminal_cmd(terminal, font_name, font_size, bg, fg, cols, rows, ansi_path):
+    """Build the command to launch a terminal displaying the ANSI file."""
+    shell_cmd = f"printf '\\033[?25l'; cat {ansi_path}; sleep 10"
 
-    Launches Xvfb + xterm, cats the ANSI output, and screenshots the
-    window with ImageMagick. The real terminal handles all font rendering,
-    Unicode, colors, and character alignment.
+    if terminal == "urxvt":
+        return [
+            "urxvt",
+            "-fn", f"xft:{font_name}:size={font_size}",
+            "-bg", bg,
+            "-fg", fg,
+            "-geometry", f"{cols + 2}x{rows + 1}",
+            "-b", "0",
+            "-bl",
+            "+sb",
+            "-e", "bash", "-c", shell_cmd,
+        ]
+    else:  # xterm
+        return [
+            "xterm",
+            "-fa", font_name,
+            "-fs", str(font_size),
+            "-bg", bg,
+            "-fg", fg,
+            "-geometry", f"{cols + 2}x{rows + 1}",
+            "+sb",
+            "-b", "0",
+            "-bw", "0",
+            "-e", f"{shell_cmd}",
+        ]
+
+
+def _detect_terminal():
+    """Pick the best available terminal for headless rendering."""
+    import shutil
+    for term in ["urxvt", "xterm"]:
+        if shutil.which(term):
+            return term
+    return None
+
+
+def render_png(data, output_path, title=None, font_name="DejaVu Sans Mono",
+               font_size=14, terminal=None):
+    """Render terminal state to PNG via a headless terminal.
+
+    Launches Xvfb + a real terminal emulator, cats the ANSI output, and
+    screenshots the window with ImageMagick. The terminal handles all font
+    rendering, Unicode, colors, and character alignment.
+
+    Prefers urxvt (better Unicode/box-drawing) over xterm.
     """
     import shutil
     import subprocess
     import tempfile
+    import time
 
-    for tool in ["Xvfb", "xterm", "xdotool", "import"]:
+    for tool in ["Xvfb", "xdotool", "import"]:
         if not shutil.which(tool):
-            print(f"Error: {tool} not found. Install with: apt-get install xvfb xterm xdotool imagemagick",
+            print(f"Error: {tool} not found. Install with: apt-get install xvfb xdotool imagemagick",
                   file=sys.stderr)
             sys.exit(1)
 
+    if terminal is None:
+        terminal = _detect_terminal()
+    if terminal is None or not shutil.which(terminal):
+        print(f"Error: no terminal found. Install urxvt or xterm.", file=sys.stderr)
+        sys.exit(1)
+
+    t = _get_theme(data)
     ansi_content = render_ansi(data)
     cols = data["cols"]
     rows = data["rows"]
@@ -433,53 +484,44 @@ def render_png(data, output_path, title=None, scale=2, font_name="DejaVu Sans Mo
         f.write(ansi_content)
         ansi_path = f.name
 
-    display_num = 99
+    import random
+    display_num = random.randint(10, 99)
     xvfb = None
     try:
-        # Start virtual X display
         xvfb = subprocess.Popen(
             ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        import time
         time.sleep(0.5)
 
         env = os.environ.copy()
         env["DISPLAY"] = f":{display_num}"
+        env["LC_ALL"] = "C.utf8"
+        env["LANG"] = "C.utf8"
 
-        # Launch xterm with the ANSI content
-        xterm = subprocess.Popen(
-            [
-                "xterm",
-                "-fa", font_name,
-                "-fs", str(font_size),
-                "-bg", "#1e1e2e",
-                "-fg", "#cdd6f4",
-                "-geometry", f"{cols + 2}x{rows + 1}",
-                "+sb",  # no scrollbar
-                "-b", "0",  # no internal border
-                "-bw", "0",  # no window border
-                "-e", f"printf '\\033[?25l'; cat {ansi_path}; sleep 10",
-            ],
-            env=env,
+        cmd = _build_terminal_cmd(
+            terminal, font_name, font_size,
+            t["background"], t["foreground"],
+            cols, rows, ansi_path,
+        )
+        term_proc = subprocess.Popen(
+            cmd, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        time.sleep(2)  # let xterm render fully
+        time.sleep(2)
 
-        # Find the xterm window
         result = subprocess.run(
-            ["xdotool", "search", "--pid", str(xterm.pid)],
+            ["xdotool", "search", "--pid", str(term_proc.pid)],
             env=env, capture_output=True, text=True,
         )
         window_id = result.stdout.strip().split("\n")[0]
 
-        # Screenshot it
         subprocess.run(
             ["import", "-window", window_id, output_path],
             env=env, check=True,
         )
 
-        xterm.kill()
+        term_proc.kill()
     finally:
         if xvfb:
             xvfb.kill()
@@ -496,6 +538,8 @@ def main():
                         help="Font name for PNG rendering (default: DejaVu Sans Mono)")
     parser.add_argument("--font-size", type=int, default=14,
                         help="Font size for PNG rendering (default: 14)")
+    parser.add_argument("--terminal", choices=["urxvt", "xterm"],
+                        help="Terminal for PNG rendering (default: auto-detect, prefers urxvt)")
     args = parser.parse_args()
 
     with open(args.input) as f:
@@ -512,7 +556,8 @@ def main():
             f.write(result)
     elif ext == ".png":
         render_png(data, args.output, title=args.title,
-                   font_name=args.font, font_size=args.font_size)
+                   font_name=args.font, font_size=args.font_size,
+                   terminal=args.terminal)
     elif ext == ".ansi":
         result = render_ansi(data)
         with open(args.output, "w") as f:
