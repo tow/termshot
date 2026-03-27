@@ -98,6 +98,39 @@ def clear_row(data, row_idx):
         cell["char"] = " "
 
 
+def apply_ops(data, ops):
+    """Apply a list of edit operations to capture data.
+
+    ops: list of (op_type, values) tuples:
+        ("replace_all", (old, new))
+        ("replace", (row_idx_str, old, new))
+        ("set", (row_idx_str, col_idx_str, text))
+        ("clear_row", (row_idx,))   # row_idx is an int in a 1-element list
+
+    Returns number of operations that modified data.
+    """
+    count = 0
+    for op, values in ops:
+        if op == "replace_all":
+            old, new = values
+            n = replace_all(data, old, new)
+            if n:
+                count += 1
+        elif op == "replace":
+            row_s, old, new = values
+            if replace_in_row(data, int(row_s), old, new) >= 0:
+                count += 1
+        elif op == "set":
+            row_s, col_s, text = values
+            set_text(data, int(row_s), int(col_s), text)
+            count += 1
+        elif op == "clear_row":
+            row_idx = values[0]
+            clear_row(data, row_idx)
+            count += 1
+    return count
+
+
 class _OrderedAction(argparse.Action):
     """Record edit operations in the order they appear on the command line."""
 
@@ -133,35 +166,7 @@ def main():
         return
 
     ops = getattr(args, "_ops", [])
-    modified = False
-
-    for op, values in ops:
-        if op == "replace_all":
-            old, new = values
-            n = replace_all(data, old, new)
-            if n:
-                print(f"Replaced {n} occurrence(s) of '{old}' \u2192 '{new}'")
-                modified = True
-            else:
-                print(f"Warning: '{old}' not found", file=sys.stderr)
-        elif op == "replace":
-            row_s, old, new = values
-            row_idx = int(row_s)
-            if replace_in_row(data, row_idx, old, new) >= 0:
-                print(f"Row {row_idx}: '{old}' \u2192 '{new}'")
-                modified = True
-            else:
-                print(f"Warning: '{old}' not found in row {row_idx}", file=sys.stderr)
-        elif op == "set":
-            row_s, col_s, text = values
-            set_text(data, int(row_s), int(col_s), text)
-            print(f"Set ({row_s},{col_s}): '{text}'")
-            modified = True
-        elif op == "clear_row":
-            row_idx = values[0]
-            clear_row(data, row_idx)
-            print(f"Cleared row {row_idx}")
-            modified = True
+    modified = apply_ops(data, ops)
 
     if modified:
         if not args.output:
