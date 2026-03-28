@@ -29,6 +29,7 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
     sock_dir = tempfile.mkdtemp(prefix="termshot-")
     sock_path = os.path.join(sock_dir, "kitty.sock")
 
+    proc = None
     try:
         proc = subprocess.Popen([
             kitty,
@@ -72,14 +73,15 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
                 ["import", "-window", str(window_id), output_path],
                 check=True,
             )
-
-        proc.kill()
-        proc.wait()
     finally:
+        if proc:
+            proc.kill()
+            proc.wait()
         os.unlink(ansi_path)
         if os.path.exists(sock_path):
             os.unlink(sock_path)
-        os.rmdir(sock_dir)
+        if os.path.exists(sock_dir):
+            os.rmdir(sock_dir)
 
 
 def _find_kitty():

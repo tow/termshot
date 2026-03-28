@@ -1,6 +1,7 @@
 """Render captured terminal state to a standalone HTML file."""
 
 import html as html_mod
+import re
 
 _THEME_DEFAULTS = {
     "font_family": "JetBrains Mono, Fira Code, Menlo, monospace",
@@ -8,10 +9,40 @@ _THEME_DEFAULTS = {
     "border_radius": 10, "background": "#1e1e2e", "foreground": "#cdd6f4",
 }
 
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3,8}$')
+_SAFE_FONT_RE = re.compile(r'^[a-zA-Z0-9 ,\-]+$')
+
+
+def _safe_color(val, default):
+    if isinstance(val, str) and _HEX_COLOR_RE.match(val):
+        return val
+    return default
+
+
+def _safe_font(val, default):
+    if isinstance(val, str) and _SAFE_FONT_RE.match(val):
+        return val
+    return default
+
+
+def _safe_num(val, default):
+    if isinstance(val, (int, float)) and val > 0:
+        return val
+    return default
+
 
 def _theme(data):
     t = data.get("theme", {})
-    return {k: t.get(k, v) for k, v in _THEME_DEFAULTS.items()}
+    d = _THEME_DEFAULTS
+    return {
+        "font_family": _safe_font(t.get("font_family"), d["font_family"]),
+        "font_size": _safe_num(t.get("font_size"), d["font_size"]),
+        "line_height": _safe_num(t.get("line_height"), d["line_height"]),
+        "padding": _safe_num(t.get("padding"), d["padding"]),
+        "border_radius": _safe_num(t.get("border_radius"), d["border_radius"]),
+        "background": _safe_color(t.get("background"), d["background"]),
+        "foreground": _safe_color(t.get("foreground"), d["foreground"]),
+    }
 
 
 def render_html(data, title=None):
@@ -34,8 +65,8 @@ def render_html(data, title=None):
         for cell in row:
             ch = cell.get("char", " ")
             styles = []
-            cell_fg = cell.get("fg")
-            cell_bg = cell.get("bg")
+            cell_fg = _safe_color(cell.get("fg"), None)
+            cell_bg = _safe_color(cell.get("bg"), None)
 
             if cell.get("reverse"):
                 styles.append(f"color:{cell_bg or bg};background:{cell_fg or fg}")

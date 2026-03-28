@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,10 +37,10 @@ def validate(data):
         if key not in data:
             raise CaptureValidationError(f"Missing required key: {key!r}")
     cols, rows, cells = data["cols"], data["rows"], data["cells"]
-    if not isinstance(cols, int) or cols <= 0:
-        raise CaptureValidationError(f"'cols' must be a positive int, got {cols!r}")
-    if not isinstance(rows, int) or rows <= 0:
-        raise CaptureValidationError(f"'rows' must be a positive int, got {rows!r}")
+    if not isinstance(cols, int) or cols <= 0 or cols > 1000:
+        raise CaptureValidationError(f"'cols' must be 1-1000, got {cols!r}")
+    if not isinstance(rows, int) or rows <= 0 or rows > 1000:
+        raise CaptureValidationError(f"'rows' must be 1-1000, got {rows!r}")
     if not isinstance(cells, list) or len(cells) != rows:
         raise CaptureValidationError(f"'cells' has {len(cells) if isinstance(cells, list) else '?'} rows, expected {rows}")
     for y, row in enumerate(cells):
@@ -336,14 +337,13 @@ def main():
     print("Set up whatever you want to screenshot in the kitty window.")
     print()
 
-    kw = KittyWindow()
-    kw.launch()
-    input("Press Enter here when the kitty window is ready to capture...")
+    with KittyWindow() as kw:
+        kw.launch()
+        input("Press Enter here when the kitty window is ready to capture...")
 
-    # Step 2: Capture screen content
-    cols, rows = kw.get_dimensions()
-    ansi_text = kw.get_text(ansi=True)
-    kw.kill()
+        # Step 2: Capture screen content
+        cols, rows = kw.get_dimensions()
+        ansi_text = kw.get_text(ansi=True)
 
     cells = parse_ansi_to_cells(ansi_text, cols, rows)
     data = {"cols": cols, "rows": rows, "cells": cells}
@@ -355,8 +355,8 @@ def main():
     # Step 3: Launch editor in kitty
     print("Opening editor in kitty. Ctrl+S to save, Escape to cancel.")
     editor_script = (
-        f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'editor.py')}"
-        f" {json_path}; sleep infinity"
+        f"{shlex.quote(sys.executable)} {shlex.quote(os.path.join(os.path.dirname(__file__), 'editor.py'))}"
+        f" {shlex.quote(json_path)}; sleep infinity"
     )
     editor_kw = KittyWindow(extra_opts=[
         "-o", f"initial_window_width={cols}c",
@@ -368,26 +368,27 @@ def main():
         "-o", r"map cmd+s send_text all \x13",
         "-o", r"map cmd+z send_text all \x1a",
     ])
-    editor_kw.launch(cmd=["bash", "-c", editor_script])
-    input("Press Enter here when you're done editing to take the screenshot...")
+    try:
+        editor_kw.launch(cmd=["bash", "-c", editor_script])
+        input("Press Enter here when you're done editing to take the screenshot...")
 
-    # Step 4: Render output
-    ext = os.path.splitext(args.output)[1].lower()
+        # Step 4: Render output
+        ext = os.path.splitext(args.output)[1].lower()
 
-    if ext == ".png":
-        capture_window(editor_kw.get_window_id(), args.output)
-        print(f"Saved {args.output}")
-    elif ext == ".json":
-        os.rename(json_path, args.output)
-        print(f"Saved {args.output}")
-    else:
-        from render import render_to_file
-        render_to_file(load(json_path), args.output)
-        print(f"Saved {args.output}")
-
-    editor_kw.kill()
-    if os.path.exists(json_path) and ext != ".json":
-        os.unlink(json_path)
+        if ext == ".png":
+            capture_window(editor_kw.get_window_id(), args.output)
+            print(f"Saved {args.output}")
+        elif ext == ".json":
+            os.rename(json_path, args.output)
+            print(f"Saved {args.output}")
+        else:
+            from render import render_to_file
+            render_to_file(load(json_path), args.output)
+            print(f"Saved {args.output}")
+    finally:
+        editor_kw.kill()
+        if os.path.exists(json_path) and ext != ".json":
+            os.unlink(json_path)
 
 
 if __name__ == "__main__":
