@@ -8,7 +8,7 @@ import unittest
 # Add parent dir to path so we can import the modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from capture_data import validate, to_text, CaptureValidationError
+from capture import validate, to_text, CaptureValidationError
 from render.ansi import render_ansi
 
 
@@ -272,7 +272,7 @@ class TestRenderAnsiStyles(unittest.TestCase):
 class TestCaptureDataLoadSave(unittest.TestCase):
     def test_save_and_load(self):
         import tempfile
-        from capture_data import load, save
+        from capture import load, save
         data = _make_grid(["hello world"])
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
@@ -287,7 +287,7 @@ class TestCaptureDataLoadSave(unittest.TestCase):
 
     def test_load_invalid_file(self):
         import tempfile
-        from capture_data import load
+        from capture import load
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write('{"not": "valid"}')
             path = f.name

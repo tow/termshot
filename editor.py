@@ -31,7 +31,7 @@ import sys
 import termios
 import tty
 
-from capture_data import load, save
+from capture import load, save
 from render.ansi import render_ansi
 
 

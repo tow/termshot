@@ -6,31 +6,25 @@ termshot uses [kitty](https://sw.kovidgoyal.net/kitty/) as a real terminal rende
 
 ## How it works
 
-1. **Capture** -- launch a kitty terminal window, set up whatever you want to screenshot
-2. **Edit** -- modify text while preserving styles (colors, bold, etc.)
-3. **Render** -- take a screenshot of the kitty window, or export to SVG/HTML
-
 ```
 python3 capture.py -o screenshot.png
 ```
 
-This single command runs the full workflow:
-
-- Opens a kitty terminal for you to set up content
-- Press **Enter** in the controlling terminal when ready
-- Opens an interactive editor in a new kitty window
-- Press **Ctrl+S** to save edits, then **Enter** in the controlling terminal
-- Captures the kitty window to PNG
+1. Opens a kitty terminal -- set up whatever you want to screenshot
+2. Press **Enter** in the controlling terminal to capture
+3. Opens an editor in a new kitty window -- make any text or style changes
+4. Press **Ctrl+S** to save, then **Enter** in the controlling terminal
+5. Screenshots the kitty window to PNG (or renders to SVG/HTML)
 
 ## Requirements
 
 - Python 3.8+
-- [kitty terminal](https://sw.kovidgoyal.net/kitty/) (`brew install --cask kitty` on macOS)
-- `screencapture` (macOS, built-in) or `import` from ImageMagick (Linux)
+- [kitty](https://sw.kovidgoyal.net/kitty/) (`brew install --cask kitty` on macOS)
+- `screencapture` (macOS, built-in) or ImageMagick `import` (Linux)
 
-## Interactive editor
+## Editor
 
-The editor runs inside kitty so rendering is pixel-perfect. Your keystrokes go directly to the editor.
+The editor runs inside kitty for pixel-perfect rendering.
 
 | Key | Action |
 |-----|--------|
@@ -48,11 +42,11 @@ The editor runs inside kitty so rendering is pixel-perfect. Your keystrokes go d
 | Cmd+S / Ctrl+S | Save and quit |
 | Escape | Quit without saving |
 
-Supports pasting Unicode characters (Cmd+V / Ctrl+Shift+V). Cmd shortcuts work on macOS via kitty key mappings applied automatically to the editor window.
+Supports pasting Unicode characters via Cmd+V.
 
 ## Rendering
 
-Render a captured JSON to various formats:
+Render a saved JSON capture to various formats:
 
 ```bash
 python3 -m render capture.json -o output.png
@@ -62,13 +56,11 @@ python3 -m render capture.json -o output.html --title "My Terminal"
 
 | Format | Notes |
 |--------|-------|
-| PNG | Screenshots a real kitty window -- pixel-perfect |
-| SVG | Fully self-contained, scalable |
-| HTML | Interactive, selectable text |
+| PNG | Screenshots a real kitty window |
+| SVG | Self-contained, scalable |
+| HTML | Selectable text |
 
 ## JSON format
-
-The intermediate format is a simple JSON structure:
 
 ```json
 {
@@ -80,16 +72,12 @@ The intermediate format is a simple JSON structure:
 }
 ```
 
-Each cell has a `char` and optional style properties: `fg`, `bg`, `bold`, `italic`, `underline`, `reverse`.
+Each cell has a `char` and optional style properties: `fg`, `bg` (hex colors), `bold`, `italic`, `underline`, `reverse`.
 
-## Architecture
+## Files
 
 ```
-capture.py          Interactive workflow: capture -> edit -> render
-editor.py           ANSI-based editor running in kitty
-render/             SVG, HTML, PNG, ANSI renderers
-kitty_util.py       Kitty remote control wrapper
-ansi_parse.py       ANSI escape sequence parser
-capture_data.py     JSON data model and validation
-colors.py           Color definitions and conversion
+capture.py      Main workflow, kitty control, ANSI parser, JSON I/O
+editor.py       Interactive editor (runs in kitty)
+render/         SVG, HTML, PNG, ANSI renderers
 ```
