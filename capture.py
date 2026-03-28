@@ -78,9 +78,9 @@ def main():
     ext = os.path.splitext(args.output)[1].lower()
 
     if ext == ".png":
-        from render.png import _capture_window
+        from kitty_util import capture_window
         window_id = editor_kw.get_window_id()
-        _capture_window(window_id, args.output)
+        capture_window(window_id, args.output)
         print(f"Saved {args.output}")
     elif ext == ".json":
         os.rename(json_path, args.output)
@@ -88,7 +88,7 @@ def main():
     else:
         # SVG/HTML: render from the edited JSON
         from capture_data import load
-        from render.__main__ import render_to_file
+        from render import render_to_file
         data = load(json_path)
         render_to_file(data, args.output)
         print(f"Saved {args.output}")

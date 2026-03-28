@@ -116,3 +116,22 @@ class KittyWindow:
 
     def __exit__(self, *args):
         self.kill()
+
+
+def capture_window(window_id, output_path):
+    """Capture a window to PNG using the platform's tool."""
+    if sys.platform == "darwin":
+        subprocess.run(
+            ["screencapture", "-l", str(window_id), "-o", output_path],
+            check=True,
+        )
+    else:
+        if not shutil.which("import"):
+            print("Error: import (ImageMagick) not found. "
+                  "Install with: apt-get install imagemagick",
+                  file=sys.stderr)
+            sys.exit(1)
+        subprocess.run(
+            ["import", "-window", str(window_id), output_path],
+            check=True,
+        )

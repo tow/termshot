@@ -50,30 +50,6 @@ The editor runs inside kitty so rendering is pixel-perfect. Your keystrokes go d
 
 Supports pasting Unicode characters (Cmd+V / Ctrl+Shift+V). Cmd shortcuts work on macOS via kitty key mappings applied automatically to the editor window.
 
-## CLI text editing
-
-For scripted or non-interactive edits:
-
-```bash
-# Replace text everywhere
-python3 edit.py capture.json --replace-all "v1.0" "v2.0" -o edited.json
-
-# Set text at a specific position (row, col)
-python3 edit.py capture.json --set 5 10 "MOCKUP" -o edited.json
-
-# Clear a row
-python3 edit.py capture.json --clear-row 3 -o edited.json
-
-# Multiple edits in one pass
-python3 edit.py capture.json \
-    --replace-all "secret" "xxxxx" \
-    --set 0 30 "DEMO" \
-    -o edited.json
-
-# Inspect as plain text
-python3 edit.py capture.json --print
-```
-
 ## Rendering
 
 Render a captured JSON to various formats:
@@ -111,7 +87,6 @@ Each cell has a `char` and optional style properties: `fg`, `bg`, `bold`, `itali
 ```
 capture.py          Interactive workflow: capture -> edit -> render
 editor.py           ANSI-based editor running in kitty
-edit.py             CLI batch text editing
 render/             SVG, HTML, PNG, ANSI renderers
 kitty_util.py       Kitty remote control wrapper
 ansi_parse.py       ANSI escape sequence parser

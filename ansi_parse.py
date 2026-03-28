@@ -144,7 +144,7 @@ def _apply_sgr(params_str, state):
         elif p == 27:
             state["reverse"] = False
         elif 30 <= p <= 37:
-            state["fg"] = _sgr_to_name(p - 30)
+            state["fg"] = _sgr_to_hex(p - 30)
         elif p in (38, 48):
             key = "fg" if p == 38 else "bg"
             if len(parts) > 1:
@@ -165,26 +165,27 @@ def _apply_sgr(params_str, state):
         elif p == 49:
             state["bg"] = None
         elif 40 <= p <= 47:
-            state["bg"] = _sgr_to_name(p - 40)
+            state["bg"] = _sgr_to_hex(p - 40)
         elif 90 <= p <= 97:
-            state["fg"] = _sgr_to_name(p - 90 + 8)
+            state["fg"] = _sgr_to_hex(p - 90 + 8)
         elif 100 <= p <= 107:
-            state["bg"] = _sgr_to_name(p - 100 + 8)
+            state["bg"] = _sgr_to_hex(p - 100 + 8)
 
         i += 1
 
 
-_ANSI_NAMES = [
-    "black", "red", "green", "brown", "blue", "magenta", "cyan", "white",
-    "brightblack", "brightred", "brightgreen", "brightyellow",
-    "brightblue", "brightmagenta", "brightcyan", "brightwhite",
+_ANSI_16_HEX = [
+    "#000000", "#cd0000", "#00cd00", "#cdcd00",
+    "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
+    "#7f7f7f", "#ff0000", "#00ff00", "#ffff00",
+    "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
 ]
 
 
-def _sgr_to_name(index):
-    """Convert SGR color index (0-15) to color name."""
-    if 0 <= index < len(_ANSI_NAMES):
-        return _ANSI_NAMES[index]
+def _sgr_to_hex(index):
+    """Convert SGR color index (0-15) to hex color."""
+    if 0 <= index < len(_ANSI_16_HEX):
+        return _ANSI_16_HEX[index]
     return None
 
 
@@ -221,7 +222,7 @@ def _parse_color_subparams(parts):
 def _color256_to_hex(n):
     """Convert 256-color index to hex string."""
     if n < 16:
-        return _sgr_to_name(n)
+        return _sgr_to_hex(n)
     elif n < 232:
         # 6x6x6 color cube
         n -= 16

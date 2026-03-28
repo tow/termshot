@@ -8,12 +8,7 @@ import unittest
 # Add parent dir to path so we can import the modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from colors import (
-    ANSI_16, ANSI_FG_CODES, ANSI_BG_CODES,
-    resolve_color, color_to_ansi,
-)
 from capture_data import validate, to_text, CaptureValidationError
-from edit import replace_in_row, replace_all, set_text, clear_row
 from render.ansi import render_ansi
 
 
@@ -41,79 +36,6 @@ def _make_styled_grid(text, fg=None, bg=None, bold=False):
         cells.append(cell)
     return {"cols": len(text), "rows": 1, "cells": [cells]}
 
-
-# --- Color tests ---
-
-class TestResolveColor(unittest.TestCase):
-    def test_default_returns_none(self):
-        self.assertIsNone(resolve_color(None))
-        self.assertIsNone(resolve_color("default"))
-        self.assertIsNone(resolve_color(""))
-
-    def test_hash_prefixed_hex_passthrough(self):
-        self.assertEqual(resolve_color("#ff0000"), "#ff0000")
-        self.assertEqual(resolve_color("#1e1e2e"), "#1e1e2e")
-
-    def test_bare_hex_gets_hash(self):
-        self.assertEqual(resolve_color("ff8c00"), "#ff8c00")
-        self.assertEqual(resolve_color("000000"), "#000000")
-        self.assertEqual(resolve_color("ffffff"), "#ffffff")
-
-    def test_named_ansi_colors(self):
-        self.assertEqual(resolve_color("red"), "#cd0000")
-        self.assertEqual(resolve_color("blue"), "#0000ee")
-        self.assertEqual(resolve_color("brown"), "#cdcd00")
-        self.assertEqual(resolve_color("brightwhite"), "#ffffff")
-
-    def test_named_case_insensitive(self):
-        self.assertEqual(resolve_color("Red"), "#cd0000")
-        self.assertEqual(resolve_color("BLUE"), "#0000ee")
-
-    def test_unknown_returns_none(self):
-        self.assertIsNone(resolve_color("notacolor"))
-        self.assertIsNone(resolve_color("abc"))  # 3 chars, not 6
-
-
-
-class TestColorToAnsi(unittest.TestCase):
-    def test_named_fg(self):
-        self.assertEqual(color_to_ansi("red", "fg"), "\x1b[31m")
-        self.assertEqual(color_to_ansi("green", "fg"), "\x1b[32m")
-        self.assertEqual(color_to_ansi("brightred", "fg"), "\x1b[91m")
-
-    def test_named_bg(self):
-        self.assertEqual(color_to_ansi("red", "bg"), "\x1b[41m")
-        self.assertEqual(color_to_ansi("brightblue", "bg"), "\x1b[104m")
-
-    def test_truecolor_fg(self):
-        self.assertEqual(color_to_ansi("ff8c00", "fg"), "\x1b[38;2;255;140;0m")
-
-    def test_truecolor_bg(self):
-        self.assertEqual(color_to_ansi("1e1e2e", "bg"), "\x1b[48;2;30;30;46m")
-
-    def test_hash_hex(self):
-        self.assertEqual(color_to_ansi("#ff0000", "fg"), "\x1b[38;2;255;0;0m")
-
-    def test_default_empty(self):
-        self.assertEqual(color_to_ansi(None, "fg"), "")
-        self.assertEqual(color_to_ansi("default", "bg"), "")
-
-    def test_yellow_alias(self):
-        self.assertEqual(color_to_ansi("yellow", "fg"), color_to_ansi("brown", "fg"))
-
-
-class TestAnsiSgrCodeConsistency(unittest.TestCase):
-    def test_fg_codes(self):
-        self.assertEqual(ANSI_FG_CODES["black"], "30")
-        self.assertEqual(ANSI_FG_CODES["red"], "31")
-        self.assertEqual(ANSI_FG_CODES["white"], "37")
-        self.assertEqual(ANSI_FG_CODES["brightblack"], "90")
-        self.assertEqual(ANSI_FG_CODES["brightwhite"], "97")
-
-    def test_bg_codes(self):
-        self.assertEqual(ANSI_BG_CODES["black"], "40")
-        self.assertEqual(ANSI_BG_CODES["cyan"], "46")
-        self.assertEqual(ANSI_BG_CODES["brightcyan"], "106")
 
 
 
@@ -145,27 +67,27 @@ class TestValidate(unittest.TestCase):
 
 class TestRenderAnsi(unittest.TestCase):
     def test_no_spurious_leading_reset(self):
-        data = _make_styled_grid("AB", fg="red")
+        data = _make_styled_grid("AB", fg="#cd0000")
         ansi = render_ansi(data)
         self.assertFalse(ansi.startswith("\x1b[0m"))
 
     def test_reset_between_style_changes(self):
         data = {"cols": 2, "rows": 1, "cells": [[
-            {"char": "A", "fg": "red"},
-            {"char": "B", "fg": "blue"},
+            {"char": "A", "fg": "#cd0000"},
+            {"char": "B", "fg": "#0000ee"},
         ]]}
         ansi = render_ansi(data)
         self.assertIn("\x1b[0m", ansi)
 
     def test_no_reset_for_same_style(self):
-        data = _make_styled_grid("AB", fg="red")
+        data = _make_styled_grid("AB", fg="#cd0000")
         ansi = render_ansi(data)
         parts = ansi.split("A")
         after_a = parts[1] if len(parts) > 1 else ""
         self.assertTrue(after_a.startswith("B"))
 
     def test_ends_with_reset(self):
-        data = _make_styled_grid("A", fg="red")
+        data = _make_styled_grid("A", fg="#cd0000")
         ansi = render_ansi(data)
         self.assertTrue(ansi.endswith("\x1b[0m"))
 
@@ -175,103 +97,12 @@ class TestRenderAnsi(unittest.TestCase):
         self.assertEqual(ansi, "AB\x1b[0m")
 
 
-# --- Edit tests ---
-
-class TestReplaceInRow(unittest.TestCase):
-    def test_basic_replace(self):
-        data = _make_grid(["hello world"])
-        result = replace_in_row(data, 0, "world", "earth")
-        self.assertGreaterEqual(result, 0)
-        self.assertEqual(to_text(data), "hello earth")
-
-    def test_shorter_replacement_pads_spaces(self):
-        data = _make_grid(["hello world"])
-        replace_in_row(data, 0, "world", "hi")
-        row = data["cells"][0]
-        raw = "".join(cell["char"] for cell in row)
-        self.assertEqual(raw, "hello hi   ")
-        self.assertEqual(to_text(data), "hello hi")
-
-    def test_longer_replacement_truncates(self):
-        data = _make_grid(["hello world"])
-        replace_in_row(data, 0, "world", "universe!!")
-        self.assertEqual(to_text(data), "hello unive")
-
-    def test_not_found_returns_negative(self):
-        data = _make_grid(["hello world"])
-        result = replace_in_row(data, 0, "xyz", "abc")
-        self.assertEqual(result, -1)
-
-    def test_preserves_style(self):
-        data = _make_styled_grid("hello", fg="red", bold=True)
-        replace_in_row(data, 0, "ell", "ELL")
-        cell = data["cells"][0][1]
-        self.assertEqual(cell["char"], "E")
-        self.assertEqual(cell["fg"], "red")
-        self.assertTrue(cell["bold"])
-
-
-class TestReplaceAll(unittest.TestCase):
-    def test_multiple_rows(self):
-        data = _make_grid(["foo bar", "baz foo"])
-        count = replace_all(data, "foo", "FOO")
-        self.assertEqual(count, 2)
-        text = to_text(data)
-        self.assertIn("FOO bar", text)
-        self.assertIn("baz FOO", text)
-
-    def test_new_contains_old_no_infinite_loop(self):
-        data = _make_grid(["version v1 release"])
-        count = replace_all(data, "v1", "v1")
-        self.assertGreaterEqual(count, 1)
-
-    def test_new_contains_old_different(self):
-        data = _make_grid(["v1 and v1"])
-        count = replace_all(data, "v1", "v2")
-        self.assertEqual(count, 2)
-
-
-class TestSetText(unittest.TestCase):
-    def test_basic(self):
-        data = _make_grid(["hello world"])
-        set_text(data, 0, 6, "WORLD")
-        self.assertEqual(to_text(data), "hello WORLD")
-
-    def test_inherits_style(self):
-        data = _make_styled_grid("hello", fg="green")
-        set_text(data, 0, 0, "HI")
-        self.assertEqual(data["cells"][0][0]["char"], "H")
-        self.assertEqual(data["cells"][0][0]["fg"], "green")
-
-    def test_truncates_at_row_end(self):
-        data = _make_grid(["abc"])
-        set_text(data, 0, 1, "XYZW")
-        self.assertEqual(to_text(data), "aXY")
-
-    def test_out_of_bounds_col(self):
-        data = _make_grid(["abc"])
-        set_text(data, 0, 99, "X")  # should not crash
-
-
-class TestClearRow(unittest.TestCase):
-    def test_clears_to_spaces(self):
-        data = _make_grid(["hello"])
-        clear_row(data, 0)
-        self.assertEqual(to_text(data), "")
-
-    def test_preserves_style(self):
-        data = _make_styled_grid("hello", bg="blue")
-        clear_row(data, 0)
-        self.assertEqual(data["cells"][0][0]["char"], " ")
-        self.assertEqual(data["cells"][0][0]["bg"], "blue")
-
-
 # --- Render SVG/HTML tests ---
 
 class TestRenderSvg(unittest.TestCase):
     def test_basic_output(self):
         from render.svg import render_svg
-        data = _make_styled_grid("Hello", fg="red", bold=True)
+        data = _make_styled_grid("Hello", fg="#cd0000", bold=True)
         svg = render_svg(data)
         self.assertIn("<svg", svg)
         self.assertIn("</svg>", svg)
@@ -291,15 +122,15 @@ class TestRenderSvg(unittest.TestCase):
 
     def test_background_color(self):
         from render.svg import render_svg
-        data = _make_styled_grid("X", bg="blue")
+        data = _make_styled_grid("X", bg="#0000ee")
         svg = render_svg(data)
-        # Should have a background rect with the resolved blue color
+        # Should have a background rect with the blue color
         self.assertIn("fill=\"#0000ee\"", svg)
 
     def test_reverse_video(self):
         from render.svg import render_svg
         data = {"cols": 1, "rows": 1, "cells": [[
-            {"char": "R", "fg": "red", "reverse": True}
+            {"char": "R", "fg": "#cd0000", "reverse": True}
         ]]}
         svg = render_svg(data)
         self.assertIn("R", svg)
@@ -307,7 +138,7 @@ class TestRenderSvg(unittest.TestCase):
     def test_underline(self):
         from render.svg import render_svg
         data = {"cols": 1, "rows": 1, "cells": [[
-            {"char": "U", "fg": "green", "underline": True}
+            {"char": "U", "fg": "#00cd00", "underline": True}
         ]]}
         svg = render_svg(data)
         self.assertIn("stroke=", svg)
@@ -315,7 +146,7 @@ class TestRenderSvg(unittest.TestCase):
     def test_italic(self):
         from render.svg import render_svg
         data = {"cols": 1, "rows": 1, "cells": [[
-            {"char": "I", "fg": "cyan", "italic": True}
+            {"char": "I", "fg": "#00cdcd", "italic": True}
         ]]}
         svg = render_svg(data)
         self.assertIn("font-style=\"italic\"", svg)
@@ -342,7 +173,7 @@ class TestRenderSvg(unittest.TestCase):
 class TestRenderHtml(unittest.TestCase):
     def test_basic_output(self):
         from render.html import render_html
-        data = _make_styled_grid("Hello", fg="red")
+        data = _make_styled_grid("Hello", fg="#cd0000")
         html = render_html(data)
         self.assertIn("<!DOCTYPE html>", html)
         # Each char is in its own span, so check individual chars
@@ -363,21 +194,21 @@ class TestRenderHtml(unittest.TestCase):
 
     def test_styled_spans(self):
         from render.html import render_html
-        data = _make_styled_grid("B", fg="red", bold=True)
+        data = _make_styled_grid("B", fg="#cd0000", bold=True)
         html = render_html(data)
         self.assertIn("color:#cd0000", html)
         self.assertIn("font-weight:bold", html)
 
     def test_background_in_span(self):
         from render.html import render_html
-        data = _make_styled_grid("X", bg="blue")
+        data = _make_styled_grid("X", bg="#0000ee")
         html = render_html(data)
         self.assertIn("background:#0000ee", html)
 
     def test_reverse_video(self):
         from render.html import render_html
         data = {"cols": 1, "rows": 1, "cells": [[
-            {"char": "R", "fg": "red", "bg": "blue", "reverse": True}
+            {"char": "R", "fg": "#cd0000", "bg": "#0000ee", "reverse": True}
         ]]}
         html = render_html(data)
         # Reverse swaps fg/bg
@@ -422,9 +253,9 @@ class TestRenderAnsiStyles(unittest.TestCase):
         self.assertIn("\x1b[7m", ansi)
 
     def test_bg_color(self):
-        data = _make_styled_grid("X", bg="blue")
+        data = _make_styled_grid("X", bg="#0000ee")
         ansi = render_ansi(data)
-        self.assertIn("\x1b[44m", ansi)  # blue bg
+        self.assertIn("\x1b[48;2;0;0;238m", ansi)  # blue bg
 
     def test_multi_row(self):
         data = {"cols": 2, "rows": 2, "cells": [
@@ -467,25 +298,6 @@ class TestCaptureDataLoadSave(unittest.TestCase):
             os.unlink(path)
 
 
-class TestGetTheme(unittest.TestCase):
-    def test_defaults(self):
-        from capture_data import get_theme
-        data = _make_grid(["x"])
-        t = get_theme(data)
-        self.assertEqual(t["background"], "#1e1e2e")
-        self.assertEqual(t["foreground"], "#cdd6f4")
-        self.assertIn("font_family", t)
-
-    def test_custom_theme(self):
-        from capture_data import get_theme
-        data = _make_grid(["x"])
-        data["theme"] = {"background": "#000000", "font_size": 18}
-        t = get_theme(data)
-        self.assertEqual(t["background"], "#000000")
-        self.assertEqual(t["font_size"], 18)
-        # Non-overridden fields use defaults
-        self.assertEqual(t["foreground"], "#cdd6f4")
-
 
 class TestValidateEdgeCases(unittest.TestCase):
     def test_not_a_dict(self):
@@ -512,107 +324,20 @@ class TestValidateEdgeCases(unittest.TestCase):
         with self.assertRaises(CaptureValidationError):
             validate({"cols": 1, "rows": 1, "cells": [["bad"]]})
 
-
-
-# --- Edit apply_ops tests ---
-
-class TestApplyOps(unittest.TestCase):
-    def test_replace_all(self):
-        from edit import apply_ops
-        data = _make_grid(["foo bar foo"])
-        count = apply_ops(data, [("replace_all", ("foo", "FOO"))])
-        self.assertEqual(count, 1)
-        self.assertIn("FOO", to_text(data))
-
-    def test_replace(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [("replace", ("0", "world", "earth"))])
-        self.assertEqual(count, 1)
-        self.assertEqual(to_text(data), "hello earth")
-
-    def test_set(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [("set", ("0", "6", "WORLD"))])
-        self.assertEqual(count, 1)
-        self.assertEqual(to_text(data), "hello WORLD")
-
-    def test_clear_row(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [("clear_row", [0])])
-        self.assertEqual(count, 1)
-        self.assertEqual(to_text(data), "")
-
-    def test_ordered_clear_then_set(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [
-            ("clear_row", [0]),
-            ("set", ("0", "0", "HI")),
-        ])
-        self.assertEqual(count, 2)
-        self.assertEqual(to_text(data), "HI")
-
-    def test_ordered_set_then_clear(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [
-            ("set", ("0", "0", "HI")),
-            ("clear_row", [0]),
-        ])
-        self.assertEqual(count, 2)
-        self.assertEqual(to_text(data), "")
-
-    def test_replace_all_not_found(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [("replace_all", ("xyz", "abc"))])
-        self.assertEqual(count, 0)
-
-    def test_replace_not_found(self):
-        from edit import apply_ops
-        data = _make_grid(["hello world"])
-        count = apply_ops(data, [("replace", ("0", "xyz", "abc"))])
-        self.assertEqual(count, 0)
-
-    def test_multiple_mixed_ops(self):
-        from edit import apply_ops
-        data = _make_grid(["aaa bbb", "ccc ddd"])
-        count = apply_ops(data, [
-            ("replace_all", ("aaa", "AAA")),
-            ("replace", ("1", "ccc", "CCC")),
-            ("set", ("0", "4", "BBB")),
-        ])
-        self.assertEqual(count, 3)
-        text = to_text(data)
-        self.assertIn("AAA", text)
-        self.assertIn("BBB", text)
-        self.assertIn("CCC", text)
-
-    def test_empty_ops(self):
-        from edit import apply_ops
-        data = _make_grid(["hello"])
-        count = apply_ops(data, [])
-        self.assertEqual(count, 0)
-        self.assertEqual(to_text(data), "hello")
-
-
 # --- Render dispatch tests ---
 
 class TestRenderToFile(unittest.TestCase):
     def setUp(self):
         import tempfile
         self.tmpdir = tempfile.mkdtemp()
-        self.data = _make_styled_grid("Hello", fg="red", bold=True)
+        self.data = _make_styled_grid("Hello", fg="#cd0000", bold=True)
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmpdir)
 
     def test_svg(self):
-        from render.__main__ import render_to_file
+        from render import render_to_file
         path = os.path.join(self.tmpdir, "out.svg")
         fmt = render_to_file(self.data, path, title="Test")
         self.assertEqual(fmt, "svg")
@@ -622,7 +347,7 @@ class TestRenderToFile(unittest.TestCase):
         self.assertIn("Test", content)
 
     def test_html(self):
-        from render.__main__ import render_to_file
+        from render import render_to_file
         path = os.path.join(self.tmpdir, "out.html")
         fmt = render_to_file(self.data, path, title="Test")
         self.assertEqual(fmt, "html")
@@ -631,7 +356,7 @@ class TestRenderToFile(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", content)
 
     def test_ansi(self):
-        from render.__main__ import render_to_file
+        from render import render_to_file
         path = os.path.join(self.tmpdir, "out.ansi")
         fmt = render_to_file(self.data, path)
         self.assertEqual(fmt, "ansi")
@@ -640,7 +365,7 @@ class TestRenderToFile(unittest.TestCase):
         self.assertIn("\x1b[", content)
 
     def test_unsupported_format(self):
-        from render.__main__ import render_to_file
+        from render import render_to_file
         path = os.path.join(self.tmpdir, "out.pdf")
         with self.assertRaises(ValueError) as ctx:
             render_to_file(self.data, path)
@@ -657,91 +382,7 @@ class TestRenderToFile(unittest.TestCase):
 # --- 1. Roundtrip / contract tests ---
 
 
-class TestRoundtripEditThenValidate(unittest.TestCase):
-    """Edits must produce data that still passes validate()."""
-
-    def test_replace_all_valid(self):
-        data = _make_grid(["hello world", "foo bar baz"])
-        replace_all(data, "o", "O")
-        validate(data)
-
-    def test_set_text_valid(self):
-        data = _make_grid(["hello world"])
-        set_text(data, 0, 0, "HELLO")
-        validate(data)
-
-    def test_clear_row_valid(self):
-        data = _make_grid(["hello world", "second line"])
-        clear_row(data, 0)
-        validate(data)
-
-
-class TestRoundtripCaptureEditRender(unittest.TestCase):
-    """Full pipeline: make grid -> edit -> render, no crashes."""
-
-    def test_pipeline_svg(self):
-        from render.svg import render_svg
-        data = _make_styled_grid("hello world", fg="red", bold=True)
-        replace_in_row(data, 0, "world", "WORLD")
-        validate(data)
-        svg = render_svg(data, title="Pipeline Test")
-        self.assertIn("<svg", svg)
-        self.assertIn("WORLD", svg)
-
-    def test_pipeline_html(self):
-        from render.html import render_html
-        data = _make_styled_grid("foo bar", fg="green")
-        set_text(data, 0, 4, "BAR")
-        validate(data)
-        html = render_html(data)
-        self.assertIn(">B<", html)
-
-    def test_pipeline_ansi(self):
-        data = _make_styled_grid("abc", fg="blue", bold=True)
-        replace_in_row(data, 0, "abc", "XYZ")
-        validate(data)
-        ansi = render_ansi(data)
-        self.assertIn("XYZ", ansi)
-
-    def test_save_load_roundtrip_preserves_content(self):
-        import tempfile
-        from capture_data import load, save
-        data = _make_styled_grid("test", fg="red", bg="blue", bold=True)
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-            path = f.name
-        try:
-            save(data, path)
-            loaded = load(path)
-            validate(loaded)
-            self.assertEqual(loaded["cells"][0][0]["fg"], "red")
-            self.assertEqual(loaded["cells"][0][0]["bg"], "blue")
-            self.assertTrue(loaded["cells"][0][0]["bold"])
-            self.assertEqual(to_text(loaded), "test")
-        finally:
-            os.unlink(path)
-
-
 # --- 2. Unicode throughout the pipeline ---
-
-class TestUnicodeEditOps(unittest.TestCase):
-    """Unicode characters in edit operations."""
-
-    def test_replace_with_unicode(self):
-        data = _make_grid(["hello world"])
-        replace_in_row(data, 0, "world", "wörld")
-        self.assertEqual(to_text(data), "hello wörld")
-
-    def test_set_text_unicode(self):
-        data = _make_grid(["hello world"])
-        set_text(data, 0, 0, "héllo")
-        self.assertEqual(to_text(data), "héllo world")
-
-    def test_replace_all_unicode(self):
-        data = _make_grid(["abc abc"])
-        count = replace_all(data, "abc", "äöü")
-        self.assertEqual(count, 2)
-        self.assertIn("äöü", to_text(data))
-
 
 class TestUnicodeRender(unittest.TestCase):
     """Unicode characters survive rendering."""
@@ -776,62 +417,11 @@ class TestUnicodeRender(unittest.TestCase):
     def test_box_drawing_styled(self):
         from render.svg import render_svg
         # Box drawing with color should render both char and color
-        cells = [{"char": c, "fg": "cyan"} for c in "╔══╗"]
+        cells = [{"char": c, "fg": "#00cdcd"} for c in "╔══╗"]
         data = {"cols": 4, "rows": 1, "cells": [cells]}
         svg = render_svg(data)
         self.assertIn("╔", svg)
         self.assertIn("#00cdcd", svg)  # cyan
-
-
-# --- 3. Edge cases in edit operations ---
-
-class TestEditEdgeCases(unittest.TestCase):
-    """Edge cases in edit operations."""
-
-    def test_replace_empty_search(self):
-        data = _make_grid(["hello"])
-        # Empty search string: find("") returns 0, so it finds it at position 0
-        result = replace_in_row(data, 0, "", "X")
-        # The span is 0, so no characters get replaced
-        self.assertEqual(to_text(data), "hello")
-
-    def test_replace_with_nothing(self):
-        data = _make_grid(["hello world"])
-        replace_in_row(data, 0, "world", "")
-        # "world" is 5 chars, replaced with "" -> 5 spaces
-        row_text = "".join(c["char"] for c in data["cells"][0])
-        self.assertEqual(row_text, "hello      ")
-
-    def test_set_text_empty_string(self):
-        data = _make_grid(["hello"])
-        set_text(data, 0, 0, "")  # empty text: no-op
-        self.assertEqual(to_text(data), "hello")
-
-    def test_set_text_at_last_column(self):
-        data = _make_grid(["abc"])
-        set_text(data, 0, 2, "XY")  # Only X fits, Y overflows
-        self.assertEqual(to_text(data), "abX")
-
-    def test_replace_all_empty_string_is_noop(self):
-        data = _make_grid(["hello"])
-        count = replace_all(data, "", "X")
-        self.assertEqual(count, 0)
-        self.assertEqual(to_text(data), "hello")
-
-    def test_clear_row_single_cell(self):
-        data = _make_grid(["X"])
-        clear_row(data, 0)
-        self.assertEqual(data["cells"][0][0]["char"], " ")
-
-    def test_replace_in_row_exact_length(self):
-        data = _make_grid(["abc"])
-        replace_in_row(data, 0, "abc", "XYZ")
-        self.assertEqual(to_text(data), "XYZ")
-
-    def test_replace_in_row_preserves_other_rows(self):
-        data = _make_grid(["hello", "world"])
-        replace_in_row(data, 0, "hello", "HELLO")
-        self.assertEqual(to_text(data), "HELLO\nworld")
 
 
 # --- 5. Renderer structural correctness ---
@@ -843,9 +433,9 @@ class TestRendererStructuralSvg(unittest.TestCase):
         from render.svg import render_svg
         # 3 cells with bg, should produce 3 bg rects (+ 1 main bg rect)
         cells = [
-            {"char": "A", "bg": "red"},
-            {"char": "B", "bg": "blue"},
-            {"char": "C", "bg": "green"},
+            {"char": "A", "bg": "#cd0000"},
+            {"char": "B", "bg": "#0000ee"},
+            {"char": "C", "bg": "#00cd00"},
         ]
         data = {"cols": 3, "rows": 1, "cells": [cells]}
         svg = render_svg(data)
@@ -865,9 +455,9 @@ class TestRendererStructuralSvg(unittest.TestCase):
         from render.svg import render_svg
         # Different styles force separate <text> elements
         cells = [
-            {"char": "A", "fg": "red"},
+            {"char": "A", "fg": "#cd0000"},
             {"char": " "},
-            {"char": "B", "fg": "blue"},
+            {"char": "B", "fg": "#0000ee"},
         ]
         data = {"cols": 3, "rows": 1, "cells": [cells]}
         svg = render_svg(data)
@@ -895,7 +485,7 @@ class TestRendererStructuralHtml(unittest.TestCase):
     def test_span_count_matches_styled_cells(self):
         from render.html import render_html
         cells = [
-            {"char": "A", "fg": "red"},
+            {"char": "A", "fg": "#cd0000"},
             {"char": "B"},  # unstyled -> no span
             {"char": "C", "bold": True},
         ]
@@ -918,26 +508,26 @@ class TestRendererAnsiExactBytes(unittest.TestCase):
     """ANSI renderer produces exact byte sequences for known input."""
 
     def test_single_red_char(self):
-        data = {"cols": 1, "rows": 1, "cells": [[{"char": "A", "fg": "red"}]]}
+        data = {"cols": 1, "rows": 1, "cells": [[{"char": "A", "fg": "#cd0000"}]]}
         ansi = render_ansi(data)
-        self.assertEqual(ansi, "\x1b[31mA\x1b[0m")
+        self.assertEqual(ansi, "\x1b[38;2;205;0;0mA\x1b[0m")
 
     def test_two_same_style_chars(self):
         data = {"cols": 2, "rows": 1, "cells": [[
-            {"char": "A", "fg": "red"},
-            {"char": "B", "fg": "red"},
+            {"char": "A", "fg": "#cd0000"},
+            {"char": "B", "fg": "#cd0000"},
         ]]}
         ansi = render_ansi(data)
         # Same style -> no reset between A and B
-        self.assertEqual(ansi, "\x1b[31mAB\x1b[0m")
+        self.assertEqual(ansi, "\x1b[38;2;205;0;0mAB\x1b[0m")
 
     def test_two_different_style_chars(self):
         data = {"cols": 2, "rows": 1, "cells": [[
-            {"char": "A", "fg": "red"},
-            {"char": "B", "fg": "blue"},
+            {"char": "A", "fg": "#cd0000"},
+            {"char": "B", "fg": "#0000ee"},
         ]]}
         ansi = render_ansi(data)
-        self.assertEqual(ansi, "\x1b[31mA\x1b[0m\x1b[34mB\x1b[0m")
+        self.assertEqual(ansi, "\x1b[38;2;205;0;0mA\x1b[0m\x1b[38;2;0;0;238mB\x1b[0m")
 
     def test_plain_no_escapes_except_reset(self):
         data = {"cols": 3, "rows": 1, "cells": [[
@@ -948,52 +538,25 @@ class TestRendererAnsiExactBytes(unittest.TestCase):
 
     def test_bold_and_fg(self):
         data = {"cols": 1, "rows": 1, "cells": [[
-            {"char": "X", "fg": "green", "bold": True},
+            {"char": "X", "fg": "#00cd00", "bold": True},
         ]]}
         ansi = render_ansi(data)
-        self.assertIn("\x1b[32m", ansi)  # green fg
+        self.assertIn("\x1b[38;2;0;205;0m", ansi)  # green fg
         self.assertIn("\x1b[1m", ansi)   # bold
         self.assertIn("X", ansi)
         self.assertTrue(ansi.endswith("\x1b[0m"))
 
     def test_two_rows(self):
         data = {"cols": 1, "rows": 2, "cells": [
-            [{"char": "A", "fg": "red"}],
-            [{"char": "B", "fg": "blue"}],
+            [{"char": "A", "fg": "#cd0000"}],
+            [{"char": "B", "fg": "#0000ee"}],
         ]}
         ansi = render_ansi(data)
         lines = ansi.split("\n")
         self.assertEqual(len(lines), 2)
-        self.assertEqual(lines[0], "\x1b[31mA\x1b[0m")
-        self.assertEqual(lines[1], "\x1b[34mB\x1b[0m")
+        self.assertEqual(lines[0], "\x1b[38;2;205;0;0mA\x1b[0m")
+        self.assertEqual(lines[1], "\x1b[38;2;0;0;238mB\x1b[0m")
 
-
-# --- 8. color_to_ansi symmetry ---
-
-class TestColorSymmetryAllAnsi16(unittest.TestCase):
-    """Every ANSI-16 name produces valid output from color_to_ansi."""
-
-    def test_all_16_fg_codes(self):
-        for name in ANSI_FG_CODES:
-            with self.subTest(color=name):
-                result = color_to_ansi(name, "fg")
-                self.assertTrue(result.startswith("\x1b["), f"{name} fg didn't produce SGR")
-                self.assertTrue(result.endswith("m"), f"{name} fg missing trailing 'm'")
-
-    def test_all_16_bg_codes(self):
-        for name in ANSI_BG_CODES:
-            with self.subTest(color=name):
-                result = color_to_ansi(name, "bg")
-                self.assertTrue(result.startswith("\x1b["), f"{name} bg didn't produce SGR")
-                self.assertTrue(result.endswith("m"), f"{name} bg missing trailing 'm'")
-
-    def test_resolve_color_covers_all_16(self):
-        """resolve_color() returns non-None for every ANSI-16 name."""
-        for name in ANSI_16:
-            with self.subTest(color=name):
-                result = resolve_color(name)
-                self.assertIsNotNone(result, f"resolve_color({name!r}) returned None")
-                self.assertTrue(result.startswith("#"), f"resolve_color({name!r}) = {result!r}")
 
 
 if __name__ == "__main__":

@@ -2,13 +2,21 @@
 
 import html as html_mod
 
-from colors import resolve_color
-from capture_data import get_theme
+_THEME_DEFAULTS = {
+    "font_family": "JetBrains Mono, Fira Code, Menlo, monospace",
+    "font_size": 14, "line_height": 1.4, "padding": 16,
+    "border_radius": 10, "background": "#1e1e2e", "foreground": "#cdd6f4",
+}
+
+
+def _theme(data):
+    t = data.get("theme", {})
+    return {k: t.get(k, v) for k, v in _THEME_DEFAULTS.items()}
 
 
 def render_html(data, title=None):
     """Render terminal state to a standalone HTML file."""
-    t = get_theme(data)
+    t = _theme(data)
     cells = data["cells"]
 
     font_family = t["font_family"]
@@ -16,8 +24,7 @@ def render_html(data, title=None):
     line_height = t["line_height"]
     padding = t["padding"]
     border_radius = t["border_radius"]
-    bg = t["background"]
-    fg = t["foreground"]
+    bg, fg = t["background"], t["foreground"]
 
     title_text = html_mod.escape(title) if title else "Terminal"
 
@@ -27,16 +34,16 @@ def render_html(data, title=None):
         for cell in row:
             ch = cell.get("char", " ")
             styles = []
-            resolved_fg = resolve_color(cell.get("fg"))
-            resolved_bg = resolve_color(cell.get("bg"))
+            cell_fg = cell.get("fg")
+            cell_bg = cell.get("bg")
 
             if cell.get("reverse"):
-                styles.append(f"color:{resolved_bg or bg};background:{resolved_fg or fg}")
+                styles.append(f"color:{cell_bg or bg};background:{cell_fg or fg}")
             else:
-                if resolved_fg:
-                    styles.append(f"color:{resolved_fg}")
-                if resolved_bg:
-                    styles.append(f"background:{resolved_bg}")
+                if cell_fg:
+                    styles.append(f"color:{cell_fg}")
+                if cell_bg:
+                    styles.append(f"background:{cell_bg}")
 
             if cell.get("bold"):
                 styles.append("font-weight:bold")

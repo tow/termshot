@@ -2,34 +2,35 @@
 
 import html as html_mod
 
-from colors import resolve_color
-from capture_data import get_theme
+_THEME_DEFAULTS = {
+    "font_family": "JetBrains Mono, Fira Code, Menlo, monospace",
+    "font_size": 14, "line_height": 1.4, "padding": 16,
+    "border_radius": 10, "background": "#1e1e2e", "foreground": "#cdd6f4",
+}
+
+
+def _theme(data):
+    t = data.get("theme", {})
+    return {k: t.get(k, v) for k, v in _THEME_DEFAULTS.items()}
 
 
 def _cell_style(cell):
-    """Return a hashable style key for grouping consecutive cells."""
     return (
-        cell.get("fg"),
-        cell.get("bg"),
-        cell.get("bold", False),
-        cell.get("italic", False),
-        cell.get("underline", False),
-        cell.get("reverse", False),
+        cell.get("fg"), cell.get("bg"),
+        cell.get("bold", False), cell.get("italic", False),
+        cell.get("underline", False), cell.get("reverse", False),
     )
 
 
 def render_svg(data, title=None):
     """Render terminal state to SVG string."""
-    t = get_theme(data)
-    cols = data["cols"]
-    rows = data["rows"]
-    cells = data["cells"]
+    t = _theme(data)
+    cols, rows, cells = data["cols"], data["rows"], data["cells"]
 
     font_family = t["font_family"]
     font_size = t["font_size"]
     padding = t["padding"]
-    bg = t["background"]
-    fg = t["foreground"]
+    bg, fg = t["background"], t["foreground"]
 
     char_width = font_size * 0.6
     row_height = font_size * t["line_height"]
@@ -48,7 +49,6 @@ def render_svg(data, title=None):
     parts.append(f'<rect width="{canvas_w}" height="{canvas_h}" rx="{t["border_radius"]}" '
                  f'fill="{bg}" />')
 
-    # Window dots
     dot_y = 18
     for i, color in enumerate(["#ff5f57", "#febc2e", "#28c840"]):
         cx = padding + i * 20
@@ -66,19 +66,12 @@ def render_svg(data, title=None):
                  f'stroke="{fg}" stroke-opacity="0.1" />')
 
     for y_idx, row in enumerate(cells):
-        # Background rectangles
         for x_idx, cell in enumerate(row):
-            cell_bg = resolve_color(cell.get("bg"))
+            cell_bg = cell.get("bg")
+            cell_fg = cell.get("fg") or fg
             is_reverse = cell.get("reverse", False)
-            cell_fg = resolve_color(cell.get("fg")) or fg
 
-            if is_reverse:
-                rect_color = cell_fg
-            elif cell_bg:
-                rect_color = cell_bg
-            else:
-                rect_color = None
-
+            rect_color = cell_fg if is_reverse else cell_bg
             if rect_color:
                 rx = padding + x_idx * char_width
                 ry = content_y + y_idx * row_height
@@ -86,7 +79,6 @@ def render_svg(data, title=None):
                              f'width="{char_width}" height="{row_height}" '
                              f'fill="{rect_color}" />')
 
-        # Text spans -- group consecutive same-style chars
         x = 0
         while x < len(row):
             cell = row[x]
@@ -96,34 +88,25 @@ def render_svg(data, title=None):
                 continue
 
             style = _cell_style(cell)
-            run_start = x
             run_chars = [ch]
             x += 1
-            while x < len(row):
-                if _cell_style(row[x]) == style:
-                    run_chars.append(row[x].get("char", " "))
-                    x += 1
-                else:
-                    break
+            while x < len(row) and _cell_style(row[x]) == style:
+                run_chars.append(row[x].get("char", " "))
+                x += 1
 
             text = "".join(run_chars)
             if not text.strip():
                 continue
 
-            tx = padding + run_start * char_width
+            tx = padding + (x - len(run_chars)) * char_width
             ty = content_y + y_idx * row_height + font_size
 
             is_reverse = cell.get("reverse", False)
-            if is_reverse:
-                text_color = resolve_color(cell.get("bg")) or bg
-            else:
-                text_color = resolve_color(cell.get("fg")) or fg
+            text_color = (cell.get("bg") or bg) if is_reverse else (cell.get("fg") or fg)
 
             attrs = [
-                f'x="{tx}"',
-                f'y="{ty}"',
-                f'font-family="{font_family}"',
-                f'font-size="{font_size}"',
+                f'x="{tx}"', f'y="{ty}"',
+                f'font-family="{font_family}"', f'font-size="{font_size}"',
                 f'fill="{text_color}"',
             ]
             if cell.get("bold"):

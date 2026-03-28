@@ -79,15 +79,3 @@ def to_text(data):
     return "\n".join(lines)
 
 
-def get_theme(data):
-    """Extract rendering theme with defaults. Only affects window chrome, not cell colors."""
-    theme = data.get("theme", {})
-    return {
-        "font_family": theme.get("font_family", "JetBrains Mono, Fira Code, Menlo, monospace"),
-        "font_size": theme.get("font_size", 14),
-        "line_height": theme.get("line_height", 1.4),
-        "padding": theme.get("padding", 16),
-        "border_radius": theme.get("border_radius", 10),
-        "background": theme.get("background", "#1e1e2e"),
-        "foreground": theme.get("foreground", "#cdd6f4"),
-    }
