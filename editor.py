@@ -114,19 +114,23 @@ class Editor:
         sys.stdout.write(out)
         sys.stdout.flush()
 
+    def _save_undo(self):
+        """Save the full state of the current cell for undo."""
+        cell = self.cells[self.cursor_y][self.cursor_x]
+        old = {k: cell.get(k) for k in ("char", "fg", "bg", "bold", "italic", "underline", "reverse")}
+        self.undo_stack.append((self.cursor_y, self.cursor_x, old))
+
     def edit_cell(self, ch):
         cell = self.cells[self.cursor_y][self.cursor_x]
-        old_char = cell.get("char", " ")
-        if ch != old_char:
-            self.undo_stack.append((self.cursor_y, self.cursor_x, {"char": old_char}))
+        if ch != cell.get("char", " "):
+            self._save_undo()
             cell["char"] = ch
             self.modified = True
 
     def toggle_attr(self, attr):
         """Toggle a boolean style attribute on the current cell."""
         cell = self.cells[self.cursor_y][self.cursor_x]
-        old = {k: cell.get(k) for k in ("char", "fg", "bg", "bold", "italic", "underline", "reverse")}
-        self.undo_stack.append((self.cursor_y, self.cursor_x, old))
+        self._save_undo()
         if cell.get(attr):
             cell.pop(attr, None)
         else:
@@ -146,9 +150,7 @@ class Editor:
         if self.yanked_style is None:
             return
         cell = self.cells[self.cursor_y][self.cursor_x]
-        # Save full cell state for undo
-        old = {k: cell.get(k) for k in ("char", "fg", "bg", "bold", "italic", "underline", "reverse")}
-        self.undo_stack.append((self.cursor_y, self.cursor_x, old))
+        self._save_undo()
         for key in ("fg", "bg", "bold", "italic", "underline", "reverse"):
             if key in self.yanked_style:
                 cell[key] = self.yanked_style[key]
@@ -158,19 +160,13 @@ class Editor:
 
     def undo(self):
         if self.undo_stack:
-            entry = self.undo_stack.pop()
-            y, x, old = entry[0], entry[1], entry[2]
-            if isinstance(old, str):
-                # Legacy: just a char
-                self.cells[y][x]["char"] = old
-            else:
-                # Full cell state
-                cell = self.cells[y][x]
-                for key in ("char", "fg", "bg", "bold", "italic", "underline", "reverse"):
-                    if key in old and old[key] is not None:
-                        cell[key] = old[key]
-                    else:
-                        cell.pop(key, None)
+            y, x, old = self.undo_stack.pop()
+            cell = self.cells[y][x]
+            for key in ("char", "fg", "bg", "bold", "italic", "underline", "reverse"):
+                if old.get(key) is not None:
+                    cell[key] = old[key]
+                else:
+                    cell.pop(key, None)
             self.cursor_y = y
             self.cursor_x = x
             self.modified = len(self.undo_stack) > 0

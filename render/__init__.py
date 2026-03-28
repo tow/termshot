@@ -18,8 +18,7 @@ from render.png import render_png
 __all__ = ["render_svg", "render_html", "render_ansi", "render_png", "render_to_file"]
 
 
-def render_to_file(data, output_path, title=None, font_name="DejaVu Sans Mono",
-                   font_size=14, terminal=None):
+def render_to_file(data, output_path, title=None):
     """Render capture data to a file, choosing format by extension."""
     ext = os.path.splitext(output_path)[1].lower()
     if ext == ".html":
@@ -31,8 +30,7 @@ def render_to_file(data, output_path, title=None, font_name="DejaVu Sans Mono",
             f.write(render_svg(data, title=title))
         return "svg"
     elif ext == ".png":
-        render_png(data, output_path, font_name=font_name, font_size=font_size,
-                   terminal=terminal)
+        render_png(data, output_path)
         return "png"
     elif ext == ".ansi":
         with open(output_path, "w") as f:

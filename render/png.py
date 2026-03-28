@@ -11,8 +11,7 @@ import time
 from render.ansi import render_ansi
 
 
-def render_png(data, output_path, font_name="DejaVu Sans Mono",
-               font_size=14, terminal=None):
+def render_png(data, output_path):
     """Render terminal state to PNG by launching kitty and capturing the window."""
     theme = data.get("theme", {})
     bg = theme.get("background", "#1e1e2e")
@@ -37,8 +36,6 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
             "-o", "allow_remote_control=yes",
             "-o", "confirm_os_window_close=0",
             "-o", "macos_quit_when_last_window_closed=yes",
-            "-o", f"font_family={font_name}",
-            "-o", f"font_size={font_size}",
             "-o", f"background={bg}",
             "-o", f"foreground={fg}",
             "-o", f"initial_window_width={cols}c",
@@ -53,6 +50,8 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
             time.sleep(0.1)
             if os.path.exists(sock_path):
                 break
+        else:
+            raise RuntimeError("kitty did not start (socket not created)")
 
         time.sleep(1.5)
 

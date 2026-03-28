@@ -148,7 +148,10 @@ class KittyWindow:
         result = self.remote("ls")
         if result.returncode != 0:
             raise RuntimeError(f"ls failed: {result.stderr}")
-        return json.loads(result.stdout)[0]["platform_window_id"]
+        ls_data = json.loads(result.stdout)
+        if not ls_data or "platform_window_id" not in ls_data[0]:
+            raise RuntimeError("could not get kitty window ID")
+        return ls_data[0]["platform_window_id"]
 
     def kill(self):
         if self.proc:
@@ -203,7 +206,7 @@ def parse_ansi_to_cells(text, cols, rows):
     bold = italic = underline = reverse = False
 
     grid = [[{"char": " "} for _ in range(cols)] for _ in range(rows)]
-    screen_rows = re.split(r"\r|\n", text)
+    screen_rows = re.split(r"\r\n|\r|\n", text)
 
     for y, line in enumerate(screen_rows):
         if y >= rows:
@@ -279,8 +282,11 @@ def _apply_sgr(params_str, state):
             else:
                 remaining = groups[i+1:]
                 color = _parse_color_subparams(remaining)
-                if remaining and remaining[0] == "2": i += 4
-                elif remaining and remaining[0] == "5": i += 2
+                # Skip consumed groups regardless of parse success
+                if remaining and remaining[0] == "2":
+                    i += min(4, len(remaining))
+                elif remaining and remaining[0] == "5":
+                    i += min(2, len(remaining))
             if color:
                 state[key] = color
         elif p == 39: state["fg"] = None
@@ -313,6 +319,8 @@ def _parse_color_subparams(parts):
 
 
 def _color256_to_hex(n):
+    if n < 0 or n > 255:
+        return None
     if n < 16:
         return _ANSI_16_HEX[n]
     elif n < 232:
@@ -331,6 +339,12 @@ def main():
     parser.add_argument("-o", "--output", required=True,
                         help="Output file (.png, .svg, .html, or .json)")
     args = parser.parse_args()
+
+    ext = os.path.splitext(args.output)[1].lower()
+    if ext not in (".png", ".svg", ".html", ".json"):
+        print(f"Error: unsupported format {ext!r} (use .png, .svg, .html, or .json)",
+              file=sys.stderr)
+        sys.exit(1)
 
     # Step 1: Launch kitty for content setup
     print("Launching kitty terminal...")
@@ -373,8 +387,6 @@ def main():
         input("Press Enter here when you're done editing to take the screenshot...")
 
         # Step 4: Render output
-        ext = os.path.splitext(args.output)[1].lower()
-
         if ext == ".png":
             capture_window(editor_kw.get_window_id(), args.output)
             print(f"Saved {args.output}")
