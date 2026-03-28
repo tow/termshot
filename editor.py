@@ -57,6 +57,17 @@ def _read_key(fd):
     if b in (0x7f, 0x08):
         return "BS"
 
+    # Handle multi-byte UTF-8
+    if b >= 0xC0:
+        if b < 0xE0:
+            remaining = 1
+        elif b < 0xF0:
+            remaining = 2
+        else:
+            remaining = 3
+        more = os.read(fd, remaining)
+        return (ch + more).decode("utf-8", errors="replace")
+
     return ch.decode("utf-8", errors="replace")
 
 
@@ -177,7 +188,7 @@ class Editor:
             self.edit_cell(" ")
             if self.cursor_x > 0:
                 self.cursor_x -= 1
-        elif len(key) == 1 and 32 <= ord(key) <= 126:
+        elif len(key) == 1 and key.isprintable():
             self.edit_cell(key)
             if self.cursor_x < self.cols - 1:
                 self.cursor_x += 1
