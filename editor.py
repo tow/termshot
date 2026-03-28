@@ -13,6 +13,8 @@ Controls:
     Home / End           Jump to start/end of row
     Any printable key    Overwrite character (keeps cell style)
     Backspace            Replace with space, move left
+    Ctrl+Y               Copy style from current cell
+    Ctrl+P               Paste style to current cell
     Ctrl+S               Save and quit
     Ctrl+Q / Escape      Quit without saving
     Ctrl+Z               Undo last edit
@@ -48,6 +50,10 @@ def _read_key(fd):
         return "QUIT"
     if b == 0x1a:
         return "UNDO"
+    if b == 0x19:  # Ctrl+Y
+        return "YANK_STYLE"
+    if b == 0x10:  # Ctrl+P
+        return "PASTE_STYLE"
     if b in (0x7f, 0x08):
         return "BS"
 
@@ -73,6 +79,7 @@ class Editor:
         self.cursor_x = 0
         self.undo_stack = []
         self.modified = False
+        self.yanked_style = None
 
     def render(self):
         """Render full screen via ANSI sequences."""
@@ -92,14 +99,48 @@ class Editor:
         cell = self.cells[self.cursor_y][self.cursor_x]
         old_char = cell.get("char", " ")
         if ch != old_char:
-            self.undo_stack.append((self.cursor_y, self.cursor_x, old_char))
+            self.undo_stack.append((self.cursor_y, self.cursor_x, {"char": old_char}))
             cell["char"] = ch
             self.modified = True
 
+    def yank_style(self):
+        """Copy the style (fg, bg, bold, etc.) from the current cell."""
+        cell = self.cells[self.cursor_y][self.cursor_x]
+        self.yanked_style = {}
+        for key in ("fg", "bg", "bold", "italic", "underline", "reverse"):
+            if cell.get(key):
+                self.yanked_style[key] = cell[key]
+
+    def paste_style(self):
+        """Apply the yanked style to the current cell."""
+        if self.yanked_style is None:
+            return
+        cell = self.cells[self.cursor_y][self.cursor_x]
+        # Save full cell state for undo
+        old = {k: cell.get(k) for k in ("char", "fg", "bg", "bold", "italic", "underline", "reverse")}
+        self.undo_stack.append((self.cursor_y, self.cursor_x, old))
+        for key in ("fg", "bg", "bold", "italic", "underline", "reverse"):
+            if key in self.yanked_style:
+                cell[key] = self.yanked_style[key]
+            else:
+                cell.pop(key, None)
+        self.modified = True
+
     def undo(self):
         if self.undo_stack:
-            y, x, old_char = self.undo_stack.pop()
-            self.cells[y][x]["char"] = old_char
+            entry = self.undo_stack.pop()
+            y, x, old = entry[0], entry[1], entry[2]
+            if isinstance(old, str):
+                # Legacy: just a char
+                self.cells[y][x]["char"] = old
+            else:
+                # Full cell state
+                cell = self.cells[y][x]
+                for key in ("char", "fg", "bg", "bold", "italic", "underline", "reverse"):
+                    if key in old and old[key] is not None:
+                        cell[key] = old[key]
+                    else:
+                        cell.pop(key, None)
             self.cursor_y = y
             self.cursor_x = x
             self.modified = len(self.undo_stack) > 0
@@ -128,6 +169,10 @@ class Editor:
             return "quit"
         elif key == "UNDO":
             self.undo()
+        elif key == "YANK_STYLE":
+            self.yank_style()
+        elif key == "PASTE_STYLE":
+            self.paste_style()
         elif key == "BS":
             self.edit_cell(" ")
             if self.cursor_x > 0:
