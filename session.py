@@ -5,6 +5,7 @@ Shared pty session management for capture and interact.
 import fcntl
 import os
 import pty
+import re
 import select
 import shlex
 import signal
@@ -16,6 +17,10 @@ import time
 import pyte
 
 from colors import normalize_color
+
+# Sequences that pyte doesn't understand, which leak characters into the buffer.
+# Kitty keyboard protocol: CSI = <params> u, CSI < u
+_UNSUPPORTED_RE = re.compile(r'\x1b\[[=<][0-9;]*u')
 
 
 class Session:
@@ -59,7 +64,9 @@ class Session:
                 try:
                     data = os.read(self.master_fd, 65536)
                     if data:
-                        self.stream.feed(data.decode("utf-8", errors="replace"))
+                        text = data.decode("utf-8", errors="replace")
+                        text = _UNSUPPORTED_RE.sub("", text)
+                        self.stream.feed(text)
                         deadline = time.time() + settle_time
                     else:
                         break

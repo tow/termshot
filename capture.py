@@ -1,40 +1,99 @@
 #!/usr/bin/env python3
 """
-Capture a TUI application's screen state to a JSON file.
+Interactive terminal capture and edit workflow using kitty.
+
+Launches a kitty terminal for you to set up content, captures the screen,
+opens an editor for modifications, then takes the final screenshot.
 
 Usage:
-    python3 capture.py <command> [--cols 80] [--rows 24] [--wait 1.0] -o output.json
-
-Examples:
-    python3 capture.py "htop" -o htop.json
-    python3 capture.py "ls --color=always -la" -o ls.json
-    python3 capture.py "python3 my_tui.py" --cols 120 --rows 40 -o tui.json
+    python3 capture.py -o output.png
+    python3 capture.py -o output.svg
+    python3 capture.py -o output.json   # just save the edited JSON
 """
 
 import argparse
+import os
+import sys
 
-from session import Session
+from kitty_util import KittyWindow
+from ansi_parse import parse_ansi_to_cells
 from capture_data import save
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Capture a TUI to JSON")
-    parser.add_argument("command", help="Command to run")
-    parser.add_argument("--cols", type=int, default=80, help="Terminal columns")
-    parser.add_argument("--rows", type=int, default=24, help="Terminal rows")
-    parser.add_argument("--wait", type=float, default=1.5,
-                        help="Seconds to wait for output to settle")
-    parser.add_argument("-o", "--output", required=True, help="Output JSON file")
+    parser = argparse.ArgumentParser(
+        description="Capture, edit, and render terminal screenshots via kitty")
+    parser.add_argument("-o", "--output", required=True,
+                        help="Output file (.png, .svg, .html, or .json)")
     args = parser.parse_args()
 
-    print(f"Capturing: {args.command} ({args.cols}x{args.rows})")
-    with Session(args.command, cols=args.cols, rows=args.rows) as sess:
-        sess.wait_for_stable(settle_time=args.wait)
-        data = sess.to_dict()
+    # ── Step 1: Launch kitty for content setup ──
+    print("Launching kitty terminal...")
+    print("Set up whatever you want to screenshot in the kitty window.")
+    print()
 
-    save(data, args.output)
-    print(f"Saved to {args.output}")
-    print(f"Now edit the JSON, then run: python3 render.py {args.output} -o mockup.png")
+    kw = KittyWindow()
+    kw.launch()
+
+    input("Press Enter here when the kitty window is ready to capture...")
+
+    # ── Step 2: Capture screen content ──
+    cols, rows = kw.get_dimensions()
+    ansi_text = kw.get_text(ansi=True)
+    kw.kill()
+
+    cells = parse_ansi_to_cells(ansi_text, cols, rows)
+    data = {"cols": cols, "rows": rows, "cells": cells}
+
+    # Save intermediate JSON for the editor
+    json_path = args.output + ".edit.json"
+    save(data, json_path)
+    print(f"Captured {cols}x{rows} terminal to {json_path}")
+
+    # ── Step 3: Launch editor in kitty ──
+    # Editor saves JSON on Ctrl+S, then sleeps so kitty stays open for screenshot.
+    # Escape quits without saving.
+    print("Opening editor in kitty. Ctrl+S to save, Escape to cancel.")
+
+    editor_script = (
+        f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'editor.py')}"
+        f" {json_path}; sleep infinity"
+    )
+    editor_kw = KittyWindow(extra_opts=[
+        "-o", f"initial_window_width={cols}c",
+        "-o", f"initial_window_height={rows}c",
+    ])
+    editor_kw.launch(cmd=["bash", "-c", editor_script])
+
+    input("Press Enter here when you're done editing to take the screenshot...")
+
+    # ── Step 4: Render output ──
+    ext = os.path.splitext(args.output)[1].lower()
+
+    if ext == ".png":
+        import subprocess
+        window_id = editor_kw.get_window_id()
+        subprocess.run(
+            ["screencapture", "-l", str(window_id), "-o", args.output],
+            check=True,
+        )
+        print(f"Saved {args.output}")
+    elif ext == ".json":
+        os.rename(json_path, args.output)
+        print(f"Saved {args.output}")
+    else:
+        # SVG/HTML: render from the edited JSON
+        from capture_data import load
+        from render.__main__ import render_to_file
+        data = load(json_path)
+        render_to_file(data, args.output)
+        print(f"Saved {args.output}")
+
+    editor_kw.kill()
+
+    # Clean up intermediate JSON
+    if os.path.exists(json_path) and ext != ".json":
+        os.unlink(json_path)
 
 
 if __name__ == "__main__":

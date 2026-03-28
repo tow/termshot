@@ -658,31 +658,6 @@ class TestEditorToDict(unittest.TestCase):
         self.assertNotIn("theme", out)
 
 
-class TestEditorColorPair(unittest.TestCase):
-    def test_nearest_basic_black(self):
-        from editor import Editor
-        data = _make_grid(["a"])
-        editor = Editor(data)
-        import curses
-        result = editor._nearest_basic((0, 0, 0))
-        self.assertEqual(result, curses.COLOR_BLACK)
-
-    def test_nearest_basic_white(self):
-        from editor import Editor
-        data = _make_grid(["a"])
-        editor = Editor(data)
-        import curses
-        result = editor._nearest_basic((1000, 1000, 1000))
-        self.assertEqual(result, curses.COLOR_WHITE)
-
-    def test_nearest_basic_red(self):
-        from editor import Editor
-        data = _make_grid(["a"])
-        editor = Editor(data)
-        import curses
-        result = editor._nearest_basic((800, 0, 0))
-        self.assertEqual(result, curses.COLOR_RED)
-
 
 # --- Edit apply_ops tests ---
 

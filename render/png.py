@@ -15,6 +15,7 @@ import time
 
 from render.ansi import render_ansi
 from capture_data import get_theme
+from kitty_util import find_kitty
 
 
 def render_png(data, output_path, font_name="DejaVu Sans Mono",
@@ -32,28 +33,13 @@ def render_png(data, output_path, font_name="DejaVu Sans Mono",
 
 # ── macOS: kitty + screencapture ──────────────────────────────────────────────
 
-def _find_kitty():
-    """Find the kitty binary, checking PATH and standard macOS location."""
-    path = shutil.which("kitty")
-    if path:
-        return path
-    mac_path = "/Applications/kitty.app/Contents/MacOS/kitty"
-    if os.path.isfile(mac_path):
-        return mac_path
-    return None
-
-
 def _render_png_kitty(data, output_path, font_name, font_size):
     """Render via kitty terminal on macOS.
 
     Launches kitty minimized with remote control, cats the ANSI output,
     retrieves the OS window ID, and uses screencapture to grab the window.
     """
-    kitty = _find_kitty()
-    if not kitty:
-        print("Error: kitty not found. Install with: brew install --cask kitty",
-              file=sys.stderr)
-        sys.exit(1)
+    kitty = find_kitty()
     if not shutil.which("screencapture"):
         print("Error: screencapture not found", file=sys.stderr)
         sys.exit(1)
