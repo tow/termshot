@@ -38,13 +38,17 @@ The editor runs inside kitty so rendering is pixel-perfect. Your keystrokes go d
 | Home / End | Jump to start/end of row |
 | Any character | Overwrite (keeps cell style) |
 | Backspace | Replace with space, move left |
+| Cmd+B / Alt+B | Toggle bold |
+| Cmd+I / Alt+I | Toggle italic |
+| Cmd+U / Alt+U | Toggle underline |
+| Cmd+R / Alt+R | Toggle reverse |
 | Ctrl+Y | Copy style from current cell |
 | Ctrl+P | Paste style to current cell |
-| Ctrl+Z | Undo |
-| Ctrl+S | Save and quit |
+| Cmd+Z / Ctrl+Z | Undo |
+| Cmd+S / Ctrl+S | Save and quit |
 | Escape | Quit without saving |
 
-Supports pasting Unicode characters (Cmd+V / Ctrl+Shift+V).
+Supports pasting Unicode characters (Cmd+V / Ctrl+Shift+V). Cmd shortcuts work on macOS via kitty key mappings applied automatically to the editor window.
 
 ## CLI text editing
 
