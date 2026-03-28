@@ -71,12 +71,9 @@ def main():
     ext = os.path.splitext(args.output)[1].lower()
 
     if ext == ".png":
-        import subprocess
+        from render.png import _capture_window
         window_id = editor_kw.get_window_id()
-        subprocess.run(
-            ["screencapture", "-l", str(window_id), "-o", args.output],
-            check=True,
-        )
+        _capture_window(window_id, args.output)
         print(f"Saved {args.output}")
     elif ext == ".json":
         os.rename(json_path, args.output)

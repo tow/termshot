@@ -4,9 +4,8 @@ Shared color definitions and resolution for the termshot pipeline.
 Single source of truth for:
 - The 16 ANSI named colors (xterm defaults)
 - SGR escape code mapping (fg 30-37/90-97, bg 40-47/100-107)
-- Resolving raw pyte color values to CSS hex
-- Converting raw pyte colors to ANSI SGR escape sequences
-- Converting raw pyte colors to curses init_color args
+- Resolving color values to CSS hex
+- Converting colors to ANSI SGR escape sequences
 """
 
 
@@ -37,9 +36,6 @@ _ANSI_16_ORDERED = [
 ANSI_16 = {name: hex_val for name, hex_val, _ in _ANSI_16_ORDERED}
 ANSI_16["yellow"] = ANSI_16["brown"]
 
-# Name -> (R, G, B) in 0-255
-ANSI_16_RGB = {name: rgb for name, _, rgb in _ANSI_16_ORDERED}
-ANSI_16_RGB["yellow"] = ANSI_16_RGB["brown"]
 
 # SGR codes for foreground/background.
 # Normal colors: fg 30-37 / bg 40-47. Bright: fg 90-97 / bg 100-107.
@@ -66,15 +62,6 @@ def is_bare_hex(s):
     except ValueError:
         return False
 
-
-def normalize_color(color_value):
-    """Store the raw pyte color value, only skipping 'default'.
-
-    Used at capture time to decide what goes into the JSON.
-    """
-    if not color_value or color_value == "default":
-        return None
-    return color_value
 
 
 def resolve_color(raw):
@@ -118,24 +105,3 @@ def color_to_ansi(raw, layer="fg"):
     return ""
 
 
-def color_to_curses(raw):
-    """Convert a raw pyte color to curses init_color args.
-
-    Returns (r, g, b) scaled to 0-1000, or None for default.
-    """
-    if not raw or raw == "default":
-        return None
-
-    if isinstance(raw, str) and raw.lower() in ANSI_16_RGB:
-        r, g, b = ANSI_16_RGB[raw.lower()]
-        return (r * 1000 // 255, g * 1000 // 255, b * 1000 // 255)
-
-    if isinstance(raw, str):
-        h = raw.lstrip("#")
-        if len(h) == 6 and is_bare_hex(h):
-            r = int(h[0:2], 16)
-            g = int(h[2:4], 16)
-            b = int(h[4:6], 16)
-            return (r * 1000 // 255, g * 1000 // 255, b * 1000 // 255)
-
-    return None

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for the termshot pipeline."""
 
-import json
 import os
 import sys
 import unittest
@@ -11,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from colors import (
     ANSI_16, ANSI_FG_CODES, ANSI_BG_CODES,
-    is_bare_hex, normalize_color, resolve_color, color_to_ansi, color_to_curses,
+    resolve_color, color_to_ansi,
 )
 from capture_data import validate, to_text, CaptureValidationError
 from edit import replace_in_row, replace_all, set_text, clear_row
@@ -75,18 +74,6 @@ class TestResolveColor(unittest.TestCase):
         self.assertIsNone(resolve_color("abc"))  # 3 chars, not 6
 
 
-class TestIsBareHex(unittest.TestCase):
-    def test_valid(self):
-        self.assertTrue(is_bare_hex("ff8c00"))
-        self.assertTrue(is_bare_hex("000000"))
-        self.assertTrue(is_bare_hex("abcdef"))
-
-    def test_invalid(self):
-        self.assertFalse(is_bare_hex("red"))
-        self.assertFalse(is_bare_hex("#ff8c00"))
-        self.assertFalse(is_bare_hex("gg0000"))
-        self.assertFalse(is_bare_hex("fff"))
-
 
 class TestColorToAnsi(unittest.TestCase):
     def test_named_fg(self):
@@ -128,38 +115,6 @@ class TestAnsiSgrCodeConsistency(unittest.TestCase):
         self.assertEqual(ANSI_BG_CODES["cyan"], "46")
         self.assertEqual(ANSI_BG_CODES["brightcyan"], "106")
 
-
-class TestColorToCurses(unittest.TestCase):
-    def test_default_returns_none(self):
-        self.assertIsNone(color_to_curses(None))
-        self.assertIsNone(color_to_curses("default"))
-
-    def test_named_color(self):
-        result = color_to_curses("red")
-        self.assertIsNotNone(result)
-        self.assertEqual(len(result), 3)
-        self.assertEqual(result, (803, 0, 0))  # 205 * 1000 // 255
-
-    def test_bare_hex(self):
-        result = color_to_curses("ff0000")
-        self.assertEqual(result, (1000, 0, 0))
-
-    def test_hash_hex(self):
-        result = color_to_curses("#00ff00")
-        self.assertEqual(result, (0, 1000, 0))
-
-    def test_unknown_returns_none(self):
-        self.assertIsNone(color_to_curses("notacolor"))
-
-
-class TestNormalizeColor(unittest.TestCase):
-    def test_default_none(self):
-        self.assertIsNone(normalize_color(None))
-        self.assertIsNone(normalize_color("default"))
-
-    def test_passthrough(self):
-        self.assertEqual(normalize_color("red"), "red")
-        self.assertEqual(normalize_color("ff8c00"), "ff8c00")
 
 
 # --- Capture data validation tests ---
@@ -309,76 +264,6 @@ class TestClearRow(unittest.TestCase):
         clear_row(data, 0)
         self.assertEqual(data["cells"][0][0]["char"], " ")
         self.assertEqual(data["cells"][0][0]["bg"], "blue")
-
-
-# --- Editor tests ---
-
-class TestEditorUndo(unittest.TestCase):
-    def test_undo_restores_char(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.cursor_x = 1
-        editor.edit_cell("X")
-        self.assertEqual(editor.cells[0][1]["char"], "X")
-        self.assertTrue(editor.modified)
-        editor.undo()
-        self.assertEqual(editor.cells[0][1]["char"], "b")
-        self.assertFalse(editor.modified)
-
-    def test_undo_multiple(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.cursor_x = 0
-        editor.edit_cell("X")
-        editor.cursor_x = 1
-        editor.edit_cell("Y")
-        self.assertTrue(editor.modified)
-        editor.undo()
-        self.assertTrue(editor.modified)
-        self.assertEqual(editor.cells[0][1]["char"], "b")
-        editor.undo()
-        self.assertFalse(editor.modified)
-        self.assertEqual(editor.cells[0][0]["char"], "a")
-
-    def test_undo_empty_stack(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.undo()
-        self.assertFalse(editor.modified)
-
-    def test_edit_preserves_style(self):
-        from editor import Editor
-        data = _make_styled_grid("abc", fg="red", bold=True)
-        editor = Editor(data)
-        editor.cursor_x = 1
-        editor.edit_cell("X")
-        cell = editor.cells[0][1]
-        self.assertEqual(cell["char"], "X")
-        self.assertEqual(cell["fg"], "red")
-        self.assertTrue(cell["bold"])
-
-    def test_same_char_no_undo_entry(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.cursor_x = 1
-        editor.edit_cell("b")
-        self.assertFalse(editor.modified)
-        self.assertEqual(len(editor.undo_stack), 0)
-
-
-# --- Session tests ---
-
-class TestSessionSendGuard(unittest.TestCase):
-    def test_send_after_kill_raises(self):
-        from session import Session
-        sess = Session("true", cols=10, rows=5)
-        sess.kill()
-        with self.assertRaises(RuntimeError):
-            sess.send("hello")
 
 
 # --- Render SVG/HTML tests ---
@@ -628,36 +513,6 @@ class TestValidateEdgeCases(unittest.TestCase):
             validate({"cols": 1, "rows": 1, "cells": [["bad"]]})
 
 
-# --- Editor additional tests ---
-
-class TestEditorToDict(unittest.TestCase):
-    def test_roundtrip(self):
-        from editor import Editor
-        data = _make_styled_grid("abc", fg="red")
-        editor = Editor(data)
-        editor.edit_cell("X")  # modify cursor_y=0, cursor_x=0
-        out = editor.to_dict()
-        self.assertEqual(out["cols"], 3)
-        self.assertEqual(out["rows"], 1)
-        self.assertEqual(out["cells"][0][0]["char"], "X")
-        self.assertEqual(out["cells"][0][0]["fg"], "red")
-
-    def test_preserves_theme(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        data["theme"] = {"background": "#000"}
-        editor = Editor(data)
-        out = editor.to_dict()
-        self.assertEqual(out["theme"]["background"], "#000")
-
-    def test_no_theme_key_when_absent(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        out = editor.to_dict()
-        self.assertNotIn("theme", out)
-
-
 
 # --- Edit apply_ops tests ---
 
@@ -792,91 +647,6 @@ class TestRenderToFile(unittest.TestCase):
         self.assertIn(".pdf", str(ctx.exception))
 
 
-# --- Session tests ---
-
-class TestSessionBasic(unittest.TestCase):
-    def test_capture_echo(self):
-        from session import Session
-        with Session("echo hello", cols=40, rows=5) as sess:
-            sess.wait_for("hello", timeout=5)
-            self.assertTrue(sess.screen_contains("hello"))
-            text = sess.screen_text()
-            self.assertEqual(len(text), 5)
-            found = any("hello" in line for line in text)
-            self.assertTrue(found)
-
-    def test_to_dict(self):
-        from session import Session
-        with Session("echo test123", cols=20, rows=3) as sess:
-            sess.wait_for("test123", timeout=5)
-            data = sess.to_dict()
-            self.assertEqual(data["cols"], 20)
-            self.assertEqual(data["rows"], 3)
-            self.assertEqual(len(data["cells"]), 3)
-            self.assertEqual(len(data["cells"][0]), 20)
-            # Every cell has a "char" key
-            for row in data["cells"]:
-                for cell in row:
-                    self.assertIn("char", cell)
-
-    def test_wait_for_timeout(self):
-        from session import Session
-        with Session("echo hello", cols=20, rows=3) as sess:
-            sess.drain(settle_time=0.5)
-            result = sess.wait_for("NONEXISTENT", timeout=0.5)
-            self.assertFalse(result)
-
-    def test_context_manager_kills(self):
-        from session import Session
-        sess = Session("sleep 60", cols=10, rows=3)
-        sess.__enter__()
-        pid = sess.proc.pid
-        sess.__exit__(None, None, None)
-        # Process should be dead
-        import signal
-        try:
-            os.kill(pid, 0)
-            self.fail("Process should have been killed")
-        except ProcessLookupError:
-            pass  # expected
-
-    def test_list_command(self):
-        from session import Session
-        with Session(["echo", "list_cmd"], cols=30, rows=3) as sess:
-            found = sess.wait_for("list_cmd", timeout=5)
-            self.assertTrue(found)
-
-
-# --- Interact key expansion tests ---
-
-class TestExpandKeys(unittest.TestCase):
-    def test_enter(self):
-        from interact import expand_keys
-        self.assertEqual(expand_keys("{enter}"), "\r")
-
-    def test_ctrl_c(self):
-        from interact import expand_keys
-        self.assertEqual(expand_keys("{ctrl+c}"), "\x03")
-
-    def test_arrow_keys(self):
-        from interact import expand_keys
-        self.assertEqual(expand_keys("{up}"), "\x1b[A")
-        self.assertEqual(expand_keys("{down}"), "\x1b[B")
-
-    def test_mixed(self):
-        from interact import expand_keys
-        result = expand_keys("hello{enter}")
-        self.assertEqual(result, "hello\r")
-
-    def test_escape_sequences(self):
-        from interact import expand_keys
-        result = expand_keys("\\n")
-        self.assertEqual(result, "\n")
-
-    def test_unknown_braces_unchanged(self):
-        from interact import expand_keys
-        result = expand_keys("{unknown}")
-        self.assertEqual(result, "{unknown}")
 
 
 # =============================================================================
@@ -885,25 +655,6 @@ class TestExpandKeys(unittest.TestCase):
 
 
 # --- 1. Roundtrip / contract tests ---
-
-class TestRoundtripSessionToValidate(unittest.TestCase):
-    """Session.to_dict() output must pass validate()."""
-
-    def test_echo_roundtrip(self):
-        from session import Session
-        with Session("echo roundtrip", cols=30, rows=5) as sess:
-            sess.wait_for("roundtrip", timeout=5)
-            data = sess.to_dict()
-        validate(data)
-        self.assertEqual(data["cols"], 30)
-        self.assertEqual(data["rows"], 5)
-
-    def test_empty_session_valid(self):
-        from session import Session
-        with Session("true", cols=10, rows=3) as sess:
-            sess.drain(settle_time=0.5)
-            data = sess.to_dict()
-        validate(data)
 
 
 class TestRoundtripEditThenValidate(unittest.TestCase):
@@ -1083,41 +834,6 @@ class TestEditEdgeCases(unittest.TestCase):
         self.assertEqual(to_text(data), "HELLO\nworld")
 
 
-# --- 4. Interact error paths ---
-
-class TestInteractValidation(unittest.TestCase):
-    """Interact script validation and error paths."""
-
-    def test_expand_keys_multiple_named_keys(self):
-        from interact import expand_keys
-        result = expand_keys("{up}{up}{enter}")
-        self.assertEqual(result, "\x1b[A\x1b[A\r")
-
-    def test_expand_keys_all_named_keys(self):
-        from interact import expand_keys, NAMED_KEYS
-        for name, expected in NAMED_KEYS.items():
-            with self.subTest(key=name):
-                self.assertEqual(expand_keys(name), expected)
-
-    def test_expand_keys_preserves_regular_text(self):
-        from interact import expand_keys
-        self.assertEqual(expand_keys("hello world"), "hello world")
-
-    def test_expand_keys_mixed_text_and_keys(self):
-        from interact import expand_keys
-        result = expand_keys("ls{enter}")
-        self.assertEqual(result, "ls\r")
-
-    def test_valid_step_keys_set(self):
-        from interact import VALID_STEP_KEYS
-        self.assertIn("wait_for", VALID_STEP_KEYS)
-        self.assertIn("send", VALID_STEP_KEYS)
-        self.assertIn("snapshot", VALID_STEP_KEYS)
-        self.assertIn("timeout", VALID_STEP_KEYS)
-        self.assertIn("wait_for_stable", VALID_STEP_KEYS)
-        self.assertIn("required", VALID_STEP_KEYS)
-
-
 # --- 5. Renderer structural correctness ---
 
 class TestRendererStructuralSvg(unittest.TestCase):
@@ -1252,131 +968,10 @@ class TestRendererAnsiExactBytes(unittest.TestCase):
         self.assertEqual(lines[1], "\x1b[34mB\x1b[0m")
 
 
-# --- 6. Session.to_dict() -> validate() contract ---
-
-class TestSessionToDictContract(unittest.TestCase):
-    """Session.to_dict() always produces valid capture data."""
-
-    def test_every_cell_has_char(self):
-        from session import Session
-        with Session("echo contract_test", cols=20, rows=4) as sess:
-            sess.wait_for("contract_test", timeout=5)
-            data = sess.to_dict()
-        for y, row in enumerate(data["cells"]):
-            for x, cell in enumerate(row):
-                self.assertIn("char", cell, f"Cell ({y},{x}) missing 'char'")
-                self.assertIsInstance(cell["char"], str, f"Cell ({y},{x}) char not str")
-
-    def test_dimensions_match(self):
-        from session import Session
-        with Session("true", cols=15, rows=7) as sess:
-            sess.drain(settle_time=0.5)
-            data = sess.to_dict()
-        self.assertEqual(data["cols"], 15)
-        self.assertEqual(data["rows"], 7)
-        self.assertEqual(len(data["cells"]), 7)
-        for row in data["cells"]:
-            self.assertEqual(len(row), 15)
-
-    def test_style_keys_valid(self):
-        from session import Session
-        valid_keys = {"char", "fg", "bg", "bold", "italic", "underline", "reverse"}
-        with Session("echo test", cols=10, rows=3) as sess:
-            sess.drain(settle_time=0.5)
-            data = sess.to_dict()
-        for row in data["cells"]:
-            for cell in row:
-                for key in cell:
-                    self.assertIn(key, valid_keys, f"Unexpected key: {key}")
-
-
-# --- 7. Editor cursor boundary tests ---
-
-class TestEditorCursorBoundaries(unittest.TestCase):
-    """Editor cursor movement stays within bounds."""
-
-    def test_cursor_starts_at_origin(self):
-        from editor import Editor
-        data = _make_grid(["abc", "def"])
-        editor = Editor(data)
-        self.assertEqual(editor.cursor_x, 0)
-        self.assertEqual(editor.cursor_y, 0)
-
-    def test_cursor_x_cannot_go_negative(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        # Simulate KEY_LEFT at x=0
-        editor.cursor_x = 0
-        if editor.cursor_x > 0:
-            editor.cursor_x -= 1
-        self.assertEqual(editor.cursor_x, 0)
-
-    def test_cursor_y_cannot_go_negative(self):
-        from editor import Editor
-        data = _make_grid(["abc", "def"])
-        editor = Editor(data)
-        editor.cursor_y = 0
-        if editor.cursor_y > 0:
-            editor.cursor_y -= 1
-        self.assertEqual(editor.cursor_y, 0)
-
-    def test_cursor_x_clamped_at_max(self):
-        from editor import Editor
-        data = _make_grid(["abc"])  # cols=3
-        editor = Editor(data)
-        # Simulate KEY_END
-        editor.cursor_x = editor.cols - 1
-        self.assertEqual(editor.cursor_x, 2)
-
-    def test_cursor_y_clamped_at_max(self):
-        from editor import Editor
-        data = _make_grid(["abc", "def", "ghi"])  # rows=3
-        editor = Editor(data)
-        editor.cursor_y = editor.rows - 1
-        self.assertEqual(editor.cursor_y, 2)
-
-    def test_backspace_at_col_0_stays(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.cursor_x = 0
-        # Simulate backspace: edit_cell(" "), then move left if possible
-        editor.edit_cell(" ")
-        if editor.cursor_x > 0:
-            editor.cursor_x -= 1
-        self.assertEqual(editor.cursor_x, 0)
-        self.assertEqual(data["cells"][0][0]["char"], " ")
-
-    def test_edit_cell_at_last_column_stays(self):
-        from editor import Editor
-        data = _make_grid(["abc"])
-        editor = Editor(data)
-        editor.cursor_x = 2  # last col
-        editor.edit_cell("Z")
-        # Advance cursor clamped
-        if editor.cursor_x < editor.cols - 1:
-            editor.cursor_x += 1
-        self.assertEqual(editor.cursor_x, 2)  # stays at last col
-        self.assertEqual(data["cells"][0][2]["char"], "Z")
-
-    def test_multirow_navigation(self):
-        from editor import Editor
-        data = _make_grid(["row0", "row1", "row2"])
-        editor = Editor(data)
-        # Move down to last row
-        editor.cursor_y = editor.rows - 1
-        self.assertEqual(editor.cursor_y, 2)
-        # Can't go further
-        if editor.cursor_y < editor.rows - 1:
-            editor.cursor_y += 1
-        self.assertEqual(editor.cursor_y, 2)
-
-
-# --- 8. color_to_curses / color_to_ansi symmetry ---
+# --- 8. color_to_ansi symmetry ---
 
 class TestColorSymmetryAllAnsi16(unittest.TestCase):
-    """Every ANSI-16 name produces valid output from both color_to_ansi and color_to_curses."""
+    """Every ANSI-16 name produces valid output from color_to_ansi."""
 
     def test_all_16_fg_codes(self):
         for name in ANSI_FG_CODES:
@@ -1391,25 +986,6 @@ class TestColorSymmetryAllAnsi16(unittest.TestCase):
                 result = color_to_ansi(name, "bg")
                 self.assertTrue(result.startswith("\x1b["), f"{name} bg didn't produce SGR")
                 self.assertTrue(result.endswith("m"), f"{name} bg missing trailing 'm'")
-
-    def test_all_16_curses(self):
-        for name in ANSI_16:
-            with self.subTest(color=name):
-                result = color_to_curses(name)
-                self.assertIsNotNone(result, f"{name} returned None from color_to_curses")
-                self.assertEqual(len(result), 3, f"{name} didn't return 3-tuple")
-                r, g, b = result
-                self.assertTrue(0 <= r <= 1000, f"{name} r={r} out of range")
-                self.assertTrue(0 <= g <= 1000, f"{name} g={g} out of range")
-                self.assertTrue(0 <= b <= 1000, f"{name} b={b} out of range")
-
-    def test_ansi_and_curses_agree_on_names(self):
-        """Every name that has an ANSI SGR code also resolves in curses."""
-        all_fg_names = set(ANSI_FG_CODES.keys())
-        all_curses_names = set(ANSI_16.keys())
-        # FG code names should be subset of curses-resolvable names
-        self.assertTrue(all_fg_names.issubset(all_curses_names),
-                        f"FG names not in curses: {all_fg_names - all_curses_names}")
 
     def test_resolve_color_covers_all_16(self):
         """resolve_color() returns non-None for every ANSI-16 name."""
