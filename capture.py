@@ -62,6 +62,13 @@ def main():
     editor_kw = KittyWindow(extra_opts=[
         "-o", f"initial_window_width={cols}c",
         "-o", f"initial_window_height={rows}c",
+        # Map Cmd+key to Alt+key so Cmd+B/I/U/R work for formatting
+        "-o", r"map cmd+b send_text all \x1bb",
+        "-o", r"map cmd+i send_text all \x1bi",
+        "-o", r"map cmd+u send_text all \x1bu",
+        "-o", r"map cmd+r send_text all \x1br",
+        "-o", r"map cmd+s send_text all \x13",
+        "-o", r"map cmd+z send_text all \x1a",
     ])
     editor_kw.launch(cmd=["bash", "-c", editor_script])
 

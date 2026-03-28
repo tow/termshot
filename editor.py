@@ -13,6 +13,10 @@ Controls:
     Home / End           Jump to start/end of row
     Any printable key    Overwrite character (keeps cell style)
     Backspace            Replace with space, move left
+    Alt+B                Toggle bold
+    Alt+I                Toggle italic
+    Alt+U                Toggle underline
+    Alt+R                Toggle reverse
     Ctrl+Y               Copy style from current cell
     Ctrl+P               Paste style to current cell
     Ctrl+S               Save and quit
@@ -77,6 +81,10 @@ def _parse_key(key):
         code = key[2:]
         return {"A": "UP", "B": "DOWN", "C": "RIGHT", "D": "LEFT",
                 "H": "HOME", "F": "END"}.get(code, None)
+    # Alt+key (ESC followed by a single character)
+    if len(key) == 2 and key[0] == "\x1b":
+        return {"b": "BOLD", "i": "ITALIC", "u": "UNDERLINE",
+                "r": "REVERSE"}.get(key[1].lower(), None)
     return None
 
 
@@ -113,6 +121,17 @@ class Editor:
             self.undo_stack.append((self.cursor_y, self.cursor_x, {"char": old_char}))
             cell["char"] = ch
             self.modified = True
+
+    def toggle_attr(self, attr):
+        """Toggle a boolean style attribute on the current cell."""
+        cell = self.cells[self.cursor_y][self.cursor_x]
+        old = {k: cell.get(k) for k in ("char", "fg", "bg", "bold", "italic", "underline", "reverse")}
+        self.undo_stack.append((self.cursor_y, self.cursor_x, old))
+        if cell.get(attr):
+            cell.pop(attr, None)
+        else:
+            cell[attr] = True
+        self.modified = True
 
     def yank_style(self):
         """Copy the style (fg, bg, bold, etc.) from the current cell."""
@@ -184,6 +203,8 @@ class Editor:
             self.yank_style()
         elif key == "PASTE_STYLE":
             self.paste_style()
+        elif key in ("BOLD", "ITALIC", "UNDERLINE", "REVERSE"):
+            self.toggle_attr(key.lower())
         elif key == "BS":
             self.edit_cell(" ")
             if self.cursor_x > 0:
