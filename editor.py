@@ -17,6 +17,8 @@ Controls:
     Alt+I                Toggle italic
     Alt+U                Toggle underline
     Alt+R                Toggle reverse
+    Alt+F / Alt+Shift+F  Cycle foreground color forward / backward
+    Alt+G / Alt+Shift+G  Cycle background color forward / backward
     Ctrl+Y               Copy style from current cell
     Ctrl+P               Paste style to current cell
     Ctrl+S               Save and quit
@@ -33,6 +35,98 @@ import tty
 
 from capture import load, save
 from render.ansi import render_ansi
+
+
+# Claude Code's dark theme — extracted from the installed binary by parsing
+# the theme object that maps semantic tokens to rgb() values. Subset of the
+# full 60-color palette covering the UI states most worth recreating in
+# screenshots. The full theme is in CLAUDE_DARK_THEME below.
+COLOR_PALETTE = [
+    None,        # default
+    "#d77757",   # claude (orange — brand, spinner, "Claude:" labels)
+    "#ffffff",   # text
+    "#999999",   # inactive
+    "#505050",   # subtle
+    "#4eba65",   # success
+    "#ff6b80",   # error
+    "#ffc107",   # warning
+    "#225c2b",   # diffAdded (bg)
+    "#7a2936",   # diffRemoved (bg)
+    "#38a660",   # diffAddedWord
+    "#b3596b",   # diffRemovedWord
+    "#b1b9f9",   # permission / suggestion
+    "#48968c",   # planMode
+    "#4782c8",   # ide
+    "#af87ff",   # autoAccept / merged
+    "#fd5db1",   # bashBorder
+    "#ff7814",   # fastMode
+    "#fbbc04",   # chromeYellow
+    "#eb9f7f",   # claudeShimmer
+]
+
+# Full Claude Code dark theme — every semantic token. Useful if you want to
+# pick a more specific color than the cycle covers.
+CLAUDE_DARK_THEME = {
+    "autoAccept": "#af87ff",
+    "bashBorder": "#fd5db1",
+    "claude": "#d77757",
+    "claudeShimmer": "#eb9f7f",
+    "claudeBlue_FOR_SYSTEM_SPINNER": "#93a5ff",
+    "claudeBlueShimmer_FOR_SYSTEM_SPINNER": "#b1c3ff",
+    "permission": "#b1b9f9",
+    "permissionShimmer": "#cfd7ff",
+    "planMode": "#48968c",
+    "ide": "#4782c8",
+    "promptBorder": "#888888",
+    "promptBorderShimmer": "#a6a6a6",
+    "text": "#ffffff",
+    "inverseText": "#000000",
+    "inactive": "#999999",
+    "inactiveShimmer": "#c1c1c1",
+    "subtle": "#505050",
+    "suggestion": "#b1b9f9",
+    "remember": "#b1b9f9",
+    "background": "#00cccc",
+    "success": "#4eba65",
+    "error": "#ff6b80",
+    "warning": "#ffc107",
+    "merged": "#af87ff",
+    "warningShimmer": "#ffdf39",
+    "diffAdded": "#225c2b",
+    "diffRemoved": "#7a2936",
+    "diffAddedDimmed": "#47584a",
+    "diffRemovedDimmed": "#69484d",
+    "diffAddedWord": "#38a660",
+    "diffRemovedWord": "#b3596b",
+    "red_FOR_SUBAGENTS_ONLY": "#dc2626",
+    "blue_FOR_SUBAGENTS_ONLY": "#2563eb",
+    "green_FOR_SUBAGENTS_ONLY": "#16a34a",
+    "yellow_FOR_SUBAGENTS_ONLY": "#ca8a04",
+    "purple_FOR_SUBAGENTS_ONLY": "#9333ea",
+    "orange_FOR_SUBAGENTS_ONLY": "#ea580c",
+    "pink_FOR_SUBAGENTS_ONLY": "#db2777",
+    "cyan_FOR_SUBAGENTS_ONLY": "#0891b2",
+    "professionalBlue": "#6a9bcc",
+    "chromeYellow": "#fbbc04",
+    "userMessageBackground": "#373737",
+    "userMessageBackgroundHover": "#464646",
+    "selectionBg": "#264f78",
+    "bashMessageBackgroundColor": "#413c41",
+    "memoryBackgroundColor": "#374146",
+    "rate_limit_fill": "#b1b9f9",
+    "rate_limit_empty": "#505370",
+    "fastMode": "#ff7814",
+    "fastModeShimmer": "#ffa546",
+    "briefLabelYou": "#7ab4e8",
+    "briefLabelClaude": "#d77757",
+    "rainbow_red": "#eb5f57",
+    "rainbow_orange": "#f58b57",
+    "rainbow_yellow": "#fac35f",
+    "rainbow_green": "#91c882",
+    "rainbow_blue": "#82aadc",
+    "rainbow_indigo": "#9b82c8",
+    "rainbow_violet": "#c882b4",
+}
 
 
 def _read_key(fd):
@@ -81,10 +175,16 @@ def _parse_key(key):
         code = key[2:]
         return {"A": "UP", "B": "DOWN", "C": "RIGHT", "D": "LEFT",
                 "H": "HOME", "F": "END"}.get(code, None)
-    # Alt+key (ESC followed by a single character)
+    # Alt+key (ESC followed by a single character).
+    # Color keys distinguish case so Shift cycles backwards.
     if len(key) == 2 and key[0] == "\x1b":
+        ch = key[1]
+        if ch == "f": return "FG_COLOR"
+        if ch == "F": return "FG_COLOR_BACK"
+        if ch == "g": return "BG_COLOR"
+        if ch == "G": return "BG_COLOR_BACK"
         return {"b": "BOLD", "i": "ITALIC", "u": "UNDERLINE",
-                "r": "REVERSE"}.get(key[1].lower(), None)
+                "r": "REVERSE"}.get(ch.lower(), None)
     return None
 
 
@@ -135,6 +235,22 @@ class Editor:
             cell.pop(attr, None)
         else:
             cell[attr] = True
+        self.modified = True
+
+    def cycle_color(self, layer, direction=1):
+        """Cycle the fg or bg color through COLOR_PALETTE (direction ±1)."""
+        cell = self.cells[self.cursor_y][self.cursor_x]
+        current = cell.get(layer)
+        try:
+            idx = COLOR_PALETTE.index(current)
+        except ValueError:
+            idx = 0
+        new_color = COLOR_PALETTE[(idx + direction) % len(COLOR_PALETTE)]
+        self._save_undo()
+        if new_color is None:
+            cell.pop(layer, None)
+        else:
+            cell[layer] = new_color
         self.modified = True
 
     def yank_style(self):
@@ -201,6 +317,14 @@ class Editor:
             self.paste_style()
         elif key in ("BOLD", "ITALIC", "UNDERLINE", "REVERSE"):
             self.toggle_attr(key.lower())
+        elif key == "FG_COLOR":
+            self.cycle_color("fg", 1)
+        elif key == "FG_COLOR_BACK":
+            self.cycle_color("fg", -1)
+        elif key == "BG_COLOR":
+            self.cycle_color("bg", 1)
+        elif key == "BG_COLOR_BACK":
+            self.cycle_color("bg", -1)
         elif key == "BS":
             self.edit_cell(" ")
             if self.cursor_x > 0:
@@ -237,7 +361,9 @@ class Editor:
 
         try:
             tty.setraw(fd)
-            sys.stdout.write("\x1b[2J")
+            # Bar cursor (DECSCUSR 6) so the cell beneath shows through —
+            # otherwise a block cursor hides the fg/bg of the active cell.
+            sys.stdout.write("\x1b[2J\x1b[6 q")
             self.render()
 
             while True:
@@ -255,6 +381,8 @@ class Editor:
                 elif result == "quit":
                     return False
         finally:
+            sys.stdout.write("\x1b[0 q")  # restore default cursor shape
+            sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 

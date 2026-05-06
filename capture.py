@@ -379,6 +379,10 @@ def main():
         "-o", r"map cmd+i send_text all \x1bi",
         "-o", r"map cmd+u send_text all \x1bu",
         "-o", r"map cmd+r send_text all \x1br",
+        "-o", r"map cmd+f send_text all \x1bf",
+        "-o", r"map cmd+shift+f send_text all \x1bF",
+        "-o", r"map cmd+g send_text all \x1bg",
+        "-o", r"map cmd+shift+g send_text all \x1bG",
         "-o", r"map cmd+s send_text all \x13",
         "-o", r"map cmd+z send_text all \x1a",
     ])

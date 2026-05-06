@@ -36,6 +36,10 @@ The editor runs inside kitty for pixel-perfect rendering.
 | Cmd+I / Alt+I | Toggle italic |
 | Cmd+U / Alt+U | Toggle underline |
 | Cmd+R / Alt+R | Toggle reverse |
+| Cmd+F / Alt+F | Cycle foreground color forward |
+| Cmd+Shift+F / Alt+Shift+F | Cycle foreground color backward |
+| Cmd+G / Alt+G | Cycle background color forward |
+| Cmd+Shift+G / Alt+Shift+G | Cycle background color backward |
 | Ctrl+Y | Copy style from current cell |
 | Ctrl+P | Paste style to current cell |
 | Cmd+Z / Ctrl+Z | Undo |
